@@ -6,6 +6,7 @@ import requests
 import tempfile
 import wave
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from concurrent.futures import ThreadPoolExecutor
 
 def get_resource(relative_path):
     """通过相对路径，获取资源文件的绝对路径。这样获取路径方便程序打包"""
@@ -33,6 +34,8 @@ class ChatThread(QThread):
         super().__init__()
         self.message = message              # 用户输入的消息
         self.tts_url = "http://127.0.0.1:9880/tts"
+        # 创建线程池用于异步语音合成
+        self.tts_executor = ThreadPoolExecutor(max_workers=3)
         
     def synthesize_speech(self, text):
         """调用TTS API合成语音"""
@@ -70,6 +73,15 @@ class ChatThread(QThread):
             print(f"语音合成错误: {str(e)}")
             return None
 
+    def handle_tts_result(self, future):
+        """处理异步语音合成的结果"""
+        try:
+            audio_path = future.result()
+            if audio_path:
+                self.audio_ready.emit(audio_path)
+        except Exception as e:
+            print(f"处理TTS结果时出错: {str(e)}")
+
     def run(self):
         prompt = read_file(r"resources\prompt.txt")
         client = OpenAI(
@@ -97,16 +109,19 @@ class ChatThread(QThread):
                 
                 # 检查是否有完整的句子
                 if any(punct in content for punct in ['。', '！', '？', '.', '!', '?']):
-                    # 合成当前句子的语音
-                    audio_path = self.synthesize_speech(current_sentence)
-                    if audio_path:
-                        self.audio_ready.emit(audio_path)
+                    # 异步合成当前句子的语音
+                    sentence_to_synthesize = current_sentence
+                    future = self.tts_executor.submit(self.synthesize_speech, sentence_to_synthesize)
+                    future.add_done_callback(self.handle_tts_result)
                     current_sentence = ""
                 
                 self.message_received.emit(content)
         
         # 处理最后剩余的文本
         if current_sentence:
-            audio_path = self.synthesize_speech(current_sentence)
-            if audio_path:
-                self.audio_ready.emit(audio_path)
+            future = self.tts_executor.submit(self.synthesize_speech, current_sentence)
+            future.add_done_callback(self.handle_tts_result)
+
+    def __del__(self):
+        """清理线程池资源"""
+        self.tts_executor.shutdown(wait=False)

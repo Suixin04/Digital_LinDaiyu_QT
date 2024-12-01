@@ -105,10 +105,18 @@ class ChatWindow(QMainWindow):
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
-        self.audio_queue = []
+        self.audio_output.setVolume(0.8)
+        self.audio_queue = []        # 音频文件队列
+        self.played_files = set()    # 已播放的文件集合，用于延迟删除
         self.is_playing = False
         
         self.media_player.mediaStatusChanged.connect(self.handle_media_status_changed)
+        self.media_player.errorOccurred.connect(self.handle_media_error)
+        
+        # 添加清理计时器
+        self.cleanup_timer = QTimer()
+        self.cleanup_timer.timeout.connect(self.cleanup_played_files)
+        self.cleanup_timer.start(5000)  # 每5秒尝试清理一次
 
     def set_background(self):
         try:
@@ -252,27 +260,78 @@ class ChatWindow(QMainWindow):
         self.is_waiting = False
         self.waiting_timer.stop()
     
-    def handle_media_status_changed(self, status):
-        if status == QMediaPlayer.MediaStatus.EndOfMedia:
-            # 当前音频播放完毕，播放队列中的下一个
-            self.play_next_audio()
-    
     def play_next_audio(self):
+        """播放队列中的下一个音频"""
         if self.audio_queue:
             audio_file = self.audio_queue.pop(0)
-            self.media_player.setSource(QUrl.fromLocalFile(audio_file))
+            print(f"Playing audio file: {audio_file}")
+            
+            # 确保文件存在
+            if not os.path.exists(audio_file):
+                print(f"Audio file not found: {audio_file}")
+                self.is_playing = False
+                return
+            
+            url = QUrl.fromLocalFile(audio_file)
+            self.media_player.setSource(url)
             self.media_player.play()
-            # 删除已播放的临时文件
-            try:
-                os.remove(audio_file)
-            except:
-                pass
+            
+            print(f"Current volume: {self.audio_output.volume()}")
         else:
             self.is_playing = False
-    
+
+    def handle_media_status_changed(self, status):
+        """处理媒体状态变化"""
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            # 将当前播放的文件添加到已播放集合
+            current_source = self.media_player.source().toLocalFile()
+            if current_source:
+                self.played_files.add(current_source)
+            # 播放下一个
+            self.play_next_audio()
+
+    def cleanup_played_files(self):
+        """清理已播放的文件"""
+        if not self.played_files:
+            return
+            
+        files_to_remove = set()
+        for file_path in self.played_files:
+            try:
+                os.remove(file_path)
+                files_to_remove.add(file_path)
+                print(f"Successfully cleaned up file: {file_path}")
+            except Exception as e:
+                print(f"Failed to clean up file {file_path}: {e}")
+                
+        # 从集合中移除已成功删除的文件
+        self.played_files -= files_to_remove
+
     def handle_audio(self, audio_path):
         """处理新的音频文件"""
         self.audio_queue.append(audio_path)
         if not self.is_playing:
             self.is_playing = True
             self.play_next_audio()
+
+    def handle_media_error(self, error, error_string):
+        """处理媒体播放错误"""
+        print(f"Media Error: {error} - {error_string}")
+        # 尝试播放下一个音频
+        self.play_next_audio()
+
+    def closeEvent(self, event):
+        """窗口关闭时清理资源"""
+        # 停止播放
+        self.media_player.stop()
+        
+        # 清理所有临时文件
+        all_files = set(self.audio_queue) | self.played_files
+        for file_path in all_files:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                print(f"Failed to clean up file {file_path} on exit: {e}")
+                
+        super().closeEvent(event)
