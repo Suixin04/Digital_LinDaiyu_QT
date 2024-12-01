@@ -90,6 +90,6 @@ python main.py
 
 ## 致谢
 
-- GPT-SoVITS 项目提供的语音合成技术支持
-- 阿里云 DashScope 提供的大语言模型服务
+- GPT-SoVITS 项目提供的语音合成技术支持：https://github.com/RVC-Boss/GPT-SoVITS
+- 阿里云 DashScope 提供的大语言模型服务：https://www.aliyun.com/product/bailian?spm=5176.28103460.0.0.297c5d275hKCuO
 
