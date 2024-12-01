@@ -100,6 +100,15 @@ class ChatWindow(QMainWindow):
                 background-color: rgba(61, 139, 64, 0.9);
             }
         """)
+        
+        # 初始化音频播放器
+        self.media_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.media_player.setAudioOutput(self.audio_output)
+        self.audio_queue = []
+        self.is_playing = False
+        
+        self.media_player.mediaStatusChanged.connect(self.handle_media_status_changed)
 
     def set_background(self):
         try:
@@ -181,13 +190,14 @@ class ChatWindow(QMainWindow):
         
         # 开始等待动画
         self.is_waiting = True
-        self.waiting_dots = 0  # 重置等待动画的点数
+        self.waiting_dots = 0
         self.waiting_timer.start(500)
         
         # 创建并启动聊天线程
         self.chat_thread = ChatThread(message)
         self.chat_thread.message_received.connect(self.update_chat)
         self.chat_thread.chat_completed.connect(self.chat_completed)
+        self.chat_thread.audio_ready.connect(self.handle_audio)
         self.chat_thread.start()
     
     def append_message(self, role, message):
@@ -241,3 +251,28 @@ class ChatWindow(QMainWindow):
         # 停止等待动画
         self.is_waiting = False
         self.waiting_timer.stop()
+    
+    def handle_media_status_changed(self, status):
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            # 当前音频播放完毕，播放队列中的下一个
+            self.play_next_audio()
+    
+    def play_next_audio(self):
+        if self.audio_queue:
+            audio_file = self.audio_queue.pop(0)
+            self.media_player.setSource(QUrl.fromLocalFile(audio_file))
+            self.media_player.play()
+            # 删除已播放的临时文件
+            try:
+                os.remove(audio_file)
+            except:
+                pass
+        else:
+            self.is_playing = False
+    
+    def handle_audio(self, audio_path):
+        """处理新的音频文件"""
+        self.audio_queue.append(audio_path)
+        if not self.is_playing:
+            self.is_playing = True
+            self.play_next_audio()

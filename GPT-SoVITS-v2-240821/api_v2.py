@@ -125,6 +125,8 @@ from pydantic import BaseModel
 i18n = I18nAuto()
 cut_method_names = get_cut_method_names()
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
 parser = argparse.ArgumentParser(description="GPT-SoVITS api")
 parser.add_argument("-c", "--tts_config", type=str, default="GPT_SoVITS/configs/tts_infer.yaml", help="tts_infer路径")
 parser.add_argument("-a", "--bind_addr", type=str, default="127.0.0.1", help="default: 127.0.0.1")
@@ -137,7 +139,7 @@ host = args.bind_addr
 argv = sys.argv
 
 if config_path in [None, ""]:
-    config_path = "GPT-SoVITS/configs/tts_infer.yaml"
+    config_path = os.path.join(current_dir, "GPT-SoVITS/configs/tts_infer.yaml")
 
 tts_config = TTS_Config(config_path)
 print(tts_config)
@@ -346,34 +348,34 @@ async def control(command: str = None):
 
 @APP.get("/tts")
 async def tts_get_endpoint(
-                        text: str = None,
-                        text_lang: str = None,
-                        ref_audio_path: str = None,
-                        aux_ref_audio_paths:list = None,
-                        prompt_lang: str = None,
-                        prompt_text: str = "",
-                        top_k:int = 5,
-                        top_p:float = 1,
-                        temperature:float = 1,
-                        text_split_method:str = "cut0",
-                        batch_size:int = 1,
-                        batch_threshold:float = 0.75,
-                        split_bucket:bool = True,
-                        speed_factor:float = 1.0,
-                        fragment_interval:float = 0.3,
-                        seed:int = -1,
-                        media_type:str = "wav",
-                        streaming_mode:bool = False,
-                        parallel_infer:bool = True,
-                        repetition_penalty:float = 1.35
-                        ):
+    text: str = None,
+    text_lang: str = None,
+    ref_audio_path: str = None,
+    aux_ref_audio_paths:list = None,
+    prompt_lang: str = None,
+    prompt_text: str = "",
+    top_k:int = 5,
+    top_p:float = 1,
+    temperature:float = 1,
+    text_split_method:str = "cut0",
+    batch_size:int = 1,
+    batch_threshold:float = 0.75,
+    split_bucket:bool = True,
+    speed_factor:float = 1.0,
+    fragment_interval:float = 0.3,
+    seed:int = -1,
+    media_type:str = "wav",
+    streaming_mode:bool = False,
+    parallel_infer:bool = True,
+    repetition_penalty:float = 1.35
+):
     req = {
         "text": text,
-        "text_lang": text_lang.lower(),
+        "text_lang": text_lang.lower() if text_lang else None,
         "ref_audio_path": ref_audio_path,
         "aux_ref_audio_paths": aux_ref_audio_paths,
         "prompt_text": prompt_text,
-        "prompt_lang": prompt_lang.lower(),
+        "prompt_lang": prompt_lang.lower() if prompt_lang else None,
         "top_k": top_k,
         "top_p": top_p,
         "temperature": temperature,

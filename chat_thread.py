@@ -2,6 +2,10 @@ from PySide6.QtCore import QThread, Signal, QTimer
 from openai import OpenAI
 import os
 import sys
+import requests
+import tempfile
+import wave
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 def get_resource(relative_path):
     """通过相对路径，获取资源文件的绝对路径。这样获取路径方便程序打包"""
@@ -23,10 +27,48 @@ class ChatThread(QThread):
     '''对话线程，用于实现即时聊天'''
     message_received = Signal(str)          # 接收到消息信号
     chat_completed = Signal(str)            # 聊天结束信号
+    audio_ready = Signal(str)               # 语音合成完成信号
 
     def __init__(self, message):
         super().__init__()
         self.message = message              # 用户输入的消息
+        self.tts_url = "http://127.0.0.1:9880/tts"
+        
+    def synthesize_speech(self, text):
+        """调用TTS API合成语音"""
+        try:
+            # 获取voice_ref.wav的绝对路径
+            ref_audio_path = os.path.abspath(get_resource("resources/voice_ref.MP3"))
+            
+            params = {
+                "text": text,
+                "text_lang": "zh",
+                "ref_audio_path": ref_audio_path,  # 使用绝对路径
+                "prompt_lang": "zh",
+                "text_split_method": "cut5",
+                "streaming_mode": False,
+                "batch_size": 1,
+                "speed_factor": 1.0
+            }
+            
+            # 打印请求参数用于调试
+            print(f"TTS Request params: {params}")
+            
+            response = requests.get(self.tts_url, params=params)
+            
+            if response.status_code == 200:
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                    temp_file.write(response.content)
+                    return temp_file.name
+            else:
+                # 打印详细的错误信息
+                print(f"TTS请求失败: {response.status_code}")
+                print(f"错误详情: {response.text}")
+                return None
+                    
+        except Exception as e:
+            print(f"语音合成错误: {str(e)}")
+            return None
 
     def run(self):
         prompt = read_file(r"resources\prompt.txt")
@@ -52,4 +94,19 @@ class ChatThread(QThread):
                 content = chunk.choices[0].delta.content
                 full_content += content
                 current_sentence += content
+                
+                # 检查是否有完整的句子
+                if any(punct in content for punct in ['。', '！', '？', '.', '!', '?']):
+                    # 合成当前句子的语音
+                    audio_path = self.synthesize_speech(current_sentence)
+                    if audio_path:
+                        self.audio_ready.emit(audio_path)
+                    current_sentence = ""
+                
                 self.message_received.emit(content)
+        
+        # 处理最后剩余的文本
+        if current_sentence:
+            audio_path = self.synthesize_speech(current_sentence)
+            if audio_path:
+                self.audio_ready.emit(audio_path)
