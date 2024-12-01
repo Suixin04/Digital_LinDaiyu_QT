@@ -6,9 +6,7 @@ from chat_thread import ChatThread, get_resource
 import os
 import logging
 import traceback
-import tempfile
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-import requests
 
 
 # 设置日志
@@ -19,9 +17,6 @@ class ChatWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("数字林黛玉")
         self.setMinimumSize(800, 600)
-        self.waiting_dots = 0
-        self.is_waiting = False
-        self.temp_audio_files = []  # 存储临时音频文件
         
         # 设置背景图片
         self.set_background()
@@ -41,11 +36,6 @@ class ChatWindow(QMainWindow):
         self.chat_display.setReadOnly(True)
         self.chat_display.setObjectName("chat_display")
         layout.addWidget(self.chat_display)
-
-        # 创建播放器实例，只创建一次
-        self.player = QMediaPlayer(self)
-        self.audio_output = QAudioOutput(self)
-        self.player.setAudioOutput(self.audio_output)
         
         # 创建输入区域
         input_layout = QHBoxLayout()

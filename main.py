@@ -1,6 +1,5 @@
 import sys
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from chat_window import ChatWindow, get_resource
 
