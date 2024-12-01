@@ -46,15 +46,16 @@ cd digital-daiyu
 2. 配置python环境
 
 ```bash
-conda env create -f env.yml
-conda activate DL
+conda create -n YOURNAME python=3.10.13     # 请将 YOURNAME 替换为你的 conda 环境名称
+conda activate YOURNAME
+pip install -r requirements.txt
 ```
 
-3. 下载必要的模型文件
+1. 下载必要的模型文件
 [林黛玉语音预训练模型](https://pan.baidu.com/s/1AQi-X6UNRAMzUjFBMtnPlw?pwd=isin)
 - 将语音合成模型文件放置在 `GPT-SoVITS-v2-240821/GPT_SoVITS/pretrained_models/` 目录下
 
-4. 启动程序
+1. 启动程序
 
 ```bash
 python main.py
