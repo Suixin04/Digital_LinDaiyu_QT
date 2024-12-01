@@ -32,7 +32,7 @@ digital-daiyu/
 - **前端界面**: PySide6 (Qt for Python)
 - **对话模型**: Qwen-Plus (通过 DashScope API)
 - **语音合成**: GPT-SoVITS
-- **开发语言**: Python 3.8+
+- **开发语言**: Python 3.10.13
 
 ## 安装说明
 
@@ -41,6 +41,13 @@ digital-daiyu/
 ```bash
 git clone https://github.com/your-username/digital-daiyu.git
 cd digital-daiyu
+```
+
+2. 配置python环境
+
+```bash
+conda create -n digital-daiyu python=3.10.13
+conda activate digital-daiyu
 ```
 
 2. 安装依赖
