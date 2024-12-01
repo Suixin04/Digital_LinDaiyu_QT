@@ -46,8 +46,8 @@ cd digital-daiyu
 2. 配置python环境
 
 ```bash
-conda create -n digital-daiyu python=3.10.13
-conda activate digital-daiyu
+conda env create -f environment.yml
+conda activate DL
 ```
 
 2. 安装依赖
