@@ -46,7 +46,7 @@ cd digital-daiyu
 2. 配置python环境
 
 ```bash
-conda env create -f environment.yml
+conda env create -f env.yml
 conda activate DL
 ```
 
