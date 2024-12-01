@@ -1,0 +1,6 @@
+# TTS 配置文件
+gpt_path: "GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt"
+sovits_path: "GPT_SoVITS/pretrained_models/s2G488k.pth"
+bert_path: "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large"
+device: "cuda"
+language_reference_rate: 0.7

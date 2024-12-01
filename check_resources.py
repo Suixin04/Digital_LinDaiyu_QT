@@ -49,7 +49,7 @@ def check_resources():
     required_files = [
         "resources/prompt.txt",
         "resources/background.jpg",
-        "resources/samples/4.MP3",
+        "resources/voice_ref.MP3",
         "GPT-SoVITS-v2-240821/configs/tts_infer.yaml",
     ]
     
