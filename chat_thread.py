@@ -12,12 +12,16 @@ class ChatThread(QThread):
     chat_completed = Signal(str)            # 聊天结束信号
     audio_ready = Signal(str)               # 语音合成完成信号
 
-    def __init__(self, message):
+    def __init__(self, message, enable_tts=True):
         super().__init__()
         self.message = message              # 用户输入的消息
+        self.enable_tts = enable_tts
         self.tts_url = "http://127.0.0.1:9880/tts"
-        # 创建线程池用于异步语音合成
-        self.tts_executor = ThreadPoolExecutor(max_workers=3)
+        # 只在启用TTS时创建线程池
+        if self.enable_tts:
+            self.tts_executor = ThreadPoolExecutor(max_workers=3)
+        # 添加对话历史数组
+        self.messages = []
         
     def synthesize_speech(self, text):
         """调用TTS API合成语音"""
@@ -71,12 +75,16 @@ class ChatThread(QThread):
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         )
 
+        # 初始化系统提示
+        if not self.messages:
+            self.messages.append({'role': 'system', 'content': prompt})
+            
+        # 添加用户新消息
+        self.messages.append({'role': 'user', 'content': self.message})
+
         completion = client.chat.completions.create(
             model="qwen-plus",
-            messages=[
-                {'role': 'system', 'content': prompt},
-                {'role': 'user', 'content': self.message}
-            ],
+            messages=self.messages,  # 使用完整的对话历史
             stream=True
         )
 
@@ -89,9 +97,7 @@ class ChatThread(QThread):
                 full_content += content
                 current_sentence += content
                 
-                # 检查是否有完整的句子
-                if any(punct in content for punct in ['。', '！', '？', '.', '!', '?']):
-                    # 异步合成当前句子的语音
+                if self.enable_tts and any(punct in content for punct in ['。', '！', '？', '.', '!', '?']):
                     sentence_to_synthesize = current_sentence
                     future = self.tts_executor.submit(self.synthesize_speech, sentence_to_synthesize)
                     future.add_done_callback(self.handle_tts_result)
@@ -99,11 +105,10 @@ class ChatThread(QThread):
                 
                 self.message_received.emit(content)
         
-        # 处理最后剩余的文本
-        if current_sentence:
-            future = self.tts_executor.submit(self.synthesize_speech, current_sentence)
-            future.add_done_callback(self.handle_tts_result)
+        # 将助手的回复添加到对话历史
+        self.messages.append({'role': 'assistant', 'content': full_content})
 
     def __del__(self):
         """清理线程池资源"""
-        self.tts_executor.shutdown(wait=False)
+        if hasattr(self, 'tts_executor'):
+            self.tts_executor.shutdown(wait=False)

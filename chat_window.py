@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
-                               QTextEdit, QPushButton, QHBoxLayout, QMessageBox)
+                               QTextEdit, QPushButton, QHBoxLayout, QMessageBox, QGraphicsDropShadowEffect)
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QKeyEvent, QTextCursor, QPalette, QBrush, QImage, QPainter, QColor
 from chat_thread import ChatThread
@@ -9,13 +9,13 @@ import traceback
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from utils import get_resource
 
-
 # 设置日志
 logger = logging.getLogger(__name__)
 
 class ChatWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, enable_tts=True):
         super().__init__()
+        self.enable_tts = enable_tts
         self.setWindowTitle("数字林黛玉")
         self.setMinimumSize(800, 600)
         
@@ -36,6 +36,14 @@ class ChatWindow(QMainWindow):
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
         self.chat_display.setObjectName("chat_display")
+        
+        # 添加阴影效果
+        shadow_effect = QGraphicsDropShadowEffect()
+        shadow_effect.setBlurRadius(15)
+        shadow_effect.setOffset(3, 3)
+        shadow_effect.setColor(QColor(0, 0, 0, 100))
+        self.chat_display.setGraphicsEffect(shadow_effect)
+        
         layout.addWidget(self.chat_display)
         
         # 创建输入区域
@@ -49,6 +57,7 @@ class ChatWindow(QMainWindow):
         self.send_button.setObjectName("send_button")
         self.send_button.clicked.connect(self.send_message)
         
+        # 将发送按钮放在输入框右侧
         input_layout.addWidget(self.message_input)
         input_layout.addWidget(self.send_button)
         layout.addLayout(input_layout)
@@ -58,66 +67,69 @@ class ChatWindow(QMainWindow):
         self.waiting_timer.timeout.connect(self.update_waiting_animation)
         
         # 设置样式
-        self.setStyleSheet("""
-            QWidget#central_widget {
+        self.setStyleSheet(f"""
+            QWidget#central_widget {{
                 background-color: transparent;
-            }
-            QTextEdit {
+            }}
+            QTextEdit {{
                 background-color: rgba(255, 255, 255, 0.85);
                 border: 1px solid rgba(204, 204, 204, 0.8);
-                border-radius: 10px;
+                border-radius: 15px;
                 padding: 10px;
                 color: #333333;
-                font-size: 14px;
-            }
-            QTextEdit#chat_display {
+                font-size: 15px;
+                font-family: 'Open Sans', Arial, sans-serif;
+            }}
+            QTextEdit#chat_display {{
                 line-height: 1.8;
                 border: 2px solid rgba(224, 224, 224, 0.8);
-                border-radius: 12px;
-            }
-            QTextEdit#message_input {
+                border-radius: 15px;
+            }}
+            QTextEdit#message_input {{
                 background-color: rgba(255, 255, 255, 0.9);
                 border: 2px solid rgba(224, 224, 224, 0.8);
-                border-radius: 10px;
+                border-radius: 15px;
                 padding: 8px;
-            }
-            QTextEdit#message_input:focus {
-                border: 2px solid rgba(76, 175, 80, 0.8);
-            }
-            QPushButton#send_button {
-                background-color: rgba(76, 175, 80, 0.9);
+            }}
+            QTextEdit#message_input:focus {{
+                border: 2px solid #9D1420;
+            }}
+            QPushButton#send_button {{
+                background: #9D1420;
                 color: white;
                 border: none;
-                border-radius: 10px;
+                border-radius: 15px;
                 padding: 10px 20px;
                 min-width: 80px;
-                font-size: 14px;
+                font-size: 15px;
                 font-weight: bold;
-            }
-            QPushButton#send_button:hover {
-                background-color: rgba(69, 160, 73, 0.9);
-            }
-            QPushButton#send_button:pressed {
-                background-color: rgba(61, 139, 64, 0.9);
-            }
+            }}
+            QPushButton#send_button:hover {{
+                background-color: #B71B25;
+                transform: scale(1.05);
+            }}
+            QPushButton#send_button:pressed {{
+                background-color: #7E101A;
+                transform: scale(0.95);
+            }}
         """)
         
-        # 初始化音频播放器
-        self.media_player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
-        self.media_player.setAudioOutput(self.audio_output)
-        self.audio_output.setVolume(0.8)
-        self.audio_queue = []        # 音频文件队列
-        self.played_files = set()    # 已播放的文件集合，用于延迟删除
-        self.is_playing = False
-        
-        self.media_player.mediaStatusChanged.connect(self.handle_media_status_changed)
-        self.media_player.errorOccurred.connect(self.handle_media_error)
-        
-        # 添加清理计时器
-        self.cleanup_timer = QTimer()
-        self.cleanup_timer.timeout.connect(self.cleanup_played_files)
-        self.cleanup_timer.start(5000)  # 每5秒尝试清理一次
+        # 只在启用TTS时初始化音频相关组件
+        if self.enable_tts:
+            self.media_player = QMediaPlayer()
+            self.audio_output = QAudioOutput()
+            self.media_player.setAudioOutput(self.audio_output)
+            self.audio_output.setVolume(0.8)
+            self.audio_queue = []
+            self.played_files = set()
+            self.is_playing = False
+            
+            self.media_player.mediaStatusChanged.connect(self.handle_media_status_changed)
+            self.media_player.errorOccurred.connect(self.handle_media_error)
+            
+            self.cleanup_timer = QTimer()
+            self.cleanup_timer.timeout.connect(self.cleanup_played_files)
+            self.cleanup_timer.start(5000)
 
     def set_background(self):
         try:
@@ -203,7 +215,7 @@ class ChatWindow(QMainWindow):
         self.waiting_timer.start(500)
         
         # 创建并启动聊天线程
-        self.chat_thread = ChatThread(message)
+        self.chat_thread = ChatThread(message, enable_tts=self.enable_tts)
         self.chat_thread.message_received.connect(self.update_chat)
         self.chat_thread.chat_completed.connect(self.chat_completed)
         self.chat_thread.audio_ready.connect(self.handle_audio)
@@ -310,6 +322,14 @@ class ChatWindow(QMainWindow):
 
     def handle_audio(self, audio_path):
         """处理新的音频文件"""
+        if not self.enable_tts:
+            # 如果TTS未启用，直接删除音频文件
+            try:
+                os.remove(audio_path)
+            except:
+                pass
+            return
+            
         self.audio_queue.append(audio_path)
         if not self.is_playing:
             self.is_playing = True
