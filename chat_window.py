@@ -8,6 +8,7 @@ import logging
 import traceback
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from utils import get_resource
+from chat_asr import ASRManager
 
 # 设置日志
 logger = logging.getLogger(__name__)
@@ -53,18 +54,30 @@ class ChatWindow(QMainWindow):
         self.message_input.setObjectName("message_input")
         self.message_input.installEventFilter(self)
         
+        button_layout = QVBoxLayout()
         self.send_button = QPushButton("发送")
         self.send_button.setObjectName("send_button")
         self.send_button.clicked.connect(self.send_message)
         
-        # 将发送按钮放在输入框右侧
+        self.voice_button = QPushButton("语音输入")
+        self.voice_button.setObjectName("voice_button")
+        self.voice_button.pressed.connect(self.start_voice_input)
+        self.voice_button.released.connect(self.stop_and_send_voice_input)
+        
+        button_layout.addWidget(self.send_button)
+        button_layout.addWidget(self.voice_button)
+        
         input_layout.addWidget(self.message_input)
-        input_layout.addWidget(self.send_button)
+        input_layout.addLayout(button_layout)
         layout.addLayout(input_layout)
         
         # 创建等待动画计时器
         self.waiting_timer = QTimer()
         self.waiting_timer.timeout.connect(self.update_waiting_animation)
+        
+        # 初始化语音识别
+        self.asr_manager = None
+        self.is_recording = False
         
         # 设置样式
         self.setStyleSheet(f"""
@@ -95,7 +108,7 @@ class ChatWindow(QMainWindow):
                 border: 2px solid #9D1420;
             }}
             QPushButton#send_button {{
-                background: #9D1420;
+                background-color: #9D1420;
                 color: white;
                 border: none;
                 border-radius: 15px;
@@ -106,11 +119,25 @@ class ChatWindow(QMainWindow):
             }}
             QPushButton#send_button:hover {{
                 background-color: #B71B25;
-                transform: scale(1.05);
             }}
             QPushButton#send_button:pressed {{
                 background-color: #7E101A;
-                transform: scale(0.95);
+            }}
+            QPushButton#voice_button {{
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 15px;
+                padding: 10px 20px;
+                min-width: 80px;
+                font-size: 15px;
+                font-weight: bold;
+            }}
+            QPushButton#voice_button:hover {{
+                background-color: #45a049;
+            }}
+            QPushButton#voice_button:pressed {{
+                background-color: #3d8b40;
             }}
         """)
         
@@ -141,42 +168,13 @@ class ChatWindow(QMainWindow):
                 logger.error(f"背景图片不存在: {background_path}")
                 raise FileNotFoundError(f"找不到背景图片: {background_path}")
             
-            background = QImage(background_path)
-            if background.isNull():
+            background_image = QImage(background_path)
+            if background_image.isNull():
                 logger.error("背景图片加载失败")
                 raise Exception("背景图片加载失败")
             
-            window_ratio = self.width() / self.height()
-            image_ratio = background.width() / background.height()
-            
-            if window_ratio > image_ratio:
-                scaled_width = self.width()
-                scaled_height = int(scaled_width / image_ratio)
-            else:
-                scaled_height = self.height()
-                scaled_width = int(scaled_height * image_ratio)
-            
-            scaled_background = background.scaled(
-                scaled_width, scaled_height,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            
-            final_image = QImage(self.width(), self.height(), QImage.Format.Format_RGB32)
-            if final_image.isNull():
-                logger.error("无法创建最终图像")
-                raise Exception("无法创建最终图像")
-            
-            x = (self.width() - scaled_width) // 2
-            y = (self.height() - scaled_height) // 2
-            
-            painter = QPainter(final_image)
-            painter.fillRect(0, 0, self.width(), self.height(), QColor('#f0f0f0'))
-            painter.drawImage(x, y, scaled_background)
-            painter.end()
-            
             palette = self.palette()
-            palette.setBrush(QPalette.ColorRole.Window, QBrush(final_image))
+            palette.setBrush(QPalette.ColorRole.Window, QBrush(background_image))
             self.setPalette(palette)
             
             logger.debug("背景设置成功")
@@ -356,3 +354,37 @@ class ChatWindow(QMainWindow):
                 print(f"Failed to clean up file {file_path} on exit: {e}")
                 
         super().closeEvent(event)
+
+    def start_voice_input(self):
+        """开始语音输入"""
+        self.voice_button.setText("正在录音...")
+        self.voice_button.setStyleSheet("""
+            QPushButton#voice_button {
+                background-color: #ff4444;
+                color: white;
+            }
+        """)
+        self.is_recording = True
+        self.asr_manager = ASRManager()
+        self.asr_manager.text_received.connect(self.handle_asr_text)
+        self.asr_manager.start()
+
+    def stop_and_send_voice_input(self):
+        """停止录音并发送消息"""
+        if self.is_recording:
+            self.voice_button.setText("语音输入")
+            self.voice_button.setStyleSheet("")
+            self.is_recording = False
+            if self.asr_manager:
+                self.asr_manager.stop()
+                self.asr_manager = None
+                # 获取输入框中的文本并发送
+                message = self.message_input.toPlainText().strip()
+                if message:
+                    self.send_message()
+
+    def handle_asr_text(self, text):
+        """处理语音识别结果"""
+        if text.strip():
+            # 直接设置新的文本，不保留旧内容
+            self.message_input.setText(text)
