@@ -49,6 +49,9 @@ cd digital-daiyu
 conda create -n YOURNAME python=3.10.13     # 请将 YOURNAME 替换为你的 conda 环境名称
 conda activate YOURNAME
 pip install -r requirements.txt
+pip uninstall torch-lightning -y
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install torch-lightning
 ```
 
 1. 下载必要的模型文件
