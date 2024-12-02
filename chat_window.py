@@ -2,11 +2,12 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                                QTextEdit, QPushButton, QHBoxLayout, QMessageBox)
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QKeyEvent, QTextCursor, QPalette, QBrush, QImage, QPainter, QColor
-from chat_thread import ChatThread, get_resource
+from chat_thread import ChatThread
 import os
 import logging
 import traceback
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from utils import get_resource
 
 
 # 设置日志
