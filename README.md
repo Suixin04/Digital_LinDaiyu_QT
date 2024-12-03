@@ -24,6 +24,7 @@ digital-daiyu/
 │ ├── splash.png                # 启动画面
 │ └── voice_ref.MP3             # 语音参考音频
 └── GPT-SoVITS-v2-240821/       # 语音合成模块
+├── chat_asr.py                 # 语音识别模块
 └── api_v2.py                   # TTS服务API
 ```
 
@@ -32,6 +33,7 @@ digital-daiyu/
 - **前端界面**: PySide6 (Qt for Python)
 - **对话模型**: Qwen-Plus (通过 DashScope API)
 - **语音合成**: GPT-SoVITS
+- **语音识别**: DashScope API
 - **开发语言**: Python 3.10.13
 
 ## 安装说明
@@ -52,6 +54,8 @@ pip install -r requirements.txt
 pip uninstall torch-lightning -y
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install torch-lightning
+pip install dashscope
+pip install pyaudio
 ```
 
 1. 下载必要的模型文件
