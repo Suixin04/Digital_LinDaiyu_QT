@@ -25,12 +25,13 @@ import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
 from io import BytesIO
 from PySide6.QtGui import QPixmap
+from chromadb.config import Settings
 
 # 设置中文字体
 def get_chinese_font():
     # 根据您的系统调整字体路径
     # 例如，对于Windows，可以使用SimHei字体
-    # 对于其他系统，请确保安装了合适的CJK字体
+    # 对于其他系统，确保安装了合适的CJK字体
     font_path = 'C:\\Windows\\Fonts\\simhei.ttf'  # Windows上的SimHei字体路径
     if not os.path.exists(font_path):
         font_path = '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc'  # 示例路径
@@ -79,7 +80,10 @@ class ChatThread(QThread):
         self.vector_store = Chroma(
             persist_directory="./knowledge_base",
             embedding_function=self.embeddings,
-            # metric="cosine"  # 确保使用余弦相似度
+            client_settings=Settings(
+                anonymized_telemetry=False,
+                is_persistent=True
+            )
         )
         self.log_signal.emit("Initialized Chroma vector store.")
         
@@ -108,27 +112,25 @@ class ChatThread(QThread):
                     self.log_signal.emit(f"Total documents in vector store: {total_docs}. Retrieving top {k} documents.")
                     
                     if k > 0:
-                        # 使用默认的L2距离进行检索
-                        docs = self.vector_store.similarity_search_with_relevance_scores(
+                        # 移除 distance_metric 参数，使用默认的相似度计算方法
+                        docs = self.vector_store.similarity_search(
                             last_message,
                             k=k
                         )
                         
                         filtered_docs = []
                         self.log_signal.emit("Retrieved relevant documents:")
-                        for i, (doc, score) in enumerate(docs, 1):
-                            # 将相关性分数转换为0-1范围
-                            similarity = score  
-                            if similarity > 0.3:
-                                filtered_docs.append((doc, similarity))
-                                self.log_signal.emit(f"文档 {i} (相关性: {similarity:.2f}): 内容: {doc.page_content[:200]}...")
+                        for i, doc in enumerate(docs, 1):
+                            filtered_docs.append(doc)
+                            self.log_signal.emit(f"文档 {i}: 内容: {doc.page_content[:200]}...")
                         
                         if filtered_docs:
-                            self.log_signal.emit(f"Filtered down to {len(filtered_docs)} documents based on similarity threshold.")
-                            return {"context": [doc for doc, _ in filtered_docs]}
-                    
+                            self.log_signal.emit(f"Retrieved {len(filtered_docs)} relevant documents.")
+                            return {"context": filtered_docs}
+                        
                 except Exception as e:
                     self.log_signal.emit(f"检索文档时出错: {e}")
+            
             self.log_signal.emit("No relevant context found.")
             return {"context": []}
 
@@ -176,10 +178,20 @@ class ChatThread(QThread):
                 self.log_signal.emit("LLM generation completed.")
                 
                 # Store AI message to vector store
-                self.vector_store.add_texts([response])
-                self.log_signal.emit("Stored AI message to vector database.")
+                try:
+                    self.vector_store.add_texts(
+                        texts=[response],
+                        metadatas=[{"type": "ai_response"}],
+                        ids=[f"ai_response_{state['messages'][-1].content[:50]}"]  # 使用用户问题的前50个字符作为ID的一部分
+                    )
+                    self.log_signal.emit("Stored AI message to vector database.")
+                except Exception as e:
+                    self.log_signal.emit(f"存储AI回答到向量数据库时出错: {e}")
+                
+                return {"messages": [AIMessage(content=response)]}
             except Exception as e:
                 self.log_signal.emit(f"生成回答时出错: {e}")
+                return {"messages": [AIMessage(content=f"生成回答时出错: {e}")]}
     
             # 生成状态图并发送
             self.generate_state_graph()
@@ -215,7 +227,7 @@ class ChatThread(QThread):
             self.log_signal.emit(f"Configured thread with thread_id: {self.thread_id}")
             
             # 准备系统消息和用户消息
-            system_message = SystemMessage(content=f"{base_system_prompt}\n\n请记住用户的名字为：小萄。")
+            system_message = SystemMessage(content=f"{base_system_prompt}")
             user_message = HumanMessage(content=self.message)
             self.log_signal.emit(f"Initialized system and user messages. User message: {self.message}")
             
