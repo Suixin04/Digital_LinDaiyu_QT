@@ -21,7 +21,7 @@ class ChatWindow(QMainWindow):
         super().__init__()
         self.enable_tts = enable_tts
         self.setWindowTitle("数字林黛玉")
-        self.setMinimumSize(800, 800)  # 增加高度以容纳图形
+        self.setMinimumSize(1000, 800)  # 增加高度以容纳图形
 
         # 初始化音频相关属性
         self.media_player = None
@@ -39,7 +39,7 @@ class ChatWindow(QMainWindow):
         # 设置中心部件透明
         central_widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setCentralWidget(central_widget)
-        self.main_layout = QVBoxLayout(central_widget)
+        self.main_layout = QHBoxLayout(central_widget)
         self.main_layout.setContentsMargins(20, 20, 20, 20)
         self.main_layout.setSpacing(15)
 
@@ -57,6 +57,9 @@ class ChatWindow(QMainWindow):
 
         self.main_layout.addWidget(self.chat_display)
 
+        self.io_layout = QVBoxLayout()
+        self.main_layout.addLayout(self.io_layout)
+
         # 创建日志显示区域
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
@@ -64,14 +67,16 @@ class ChatWindow(QMainWindow):
         self.log_display.setStyleSheet("background-color: #f0f0f0;")
         self.log_display.setMaximumHeight(150)  # 设置日志区域高度
         self.log_display.hide()  # 初始隐藏
-        self.main_layout.addWidget(self.log_display)
+        self.io_layout.addWidget(self.log_display)
 
         # 创建状态图显示区域
         self.graph_label = QLabel()
         self.graph_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.graph_label.setFixedHeight(200)  # 设置固定高度
         self.graph_label.hide()  # 初始隐藏
-        self.main_layout.addWidget(self.graph_label)
+        self.io_layout.addWidget(self.graph_label)
+
+        self.io_layout.addStretch(1)
 
         # 创建输入区域
         input_layout = QHBoxLayout()
@@ -101,7 +106,7 @@ class ChatWindow(QMainWindow):
 
         input_layout.addWidget(self.message_input)
         input_layout.addLayout(button_layout)
-        self.main_layout.addLayout(input_layout)
+        self.io_layout.addLayout(input_layout)
 
         # 创建等待动画计时器
         self.waiting_timer = QTimer()
@@ -462,15 +467,11 @@ class ChatWindow(QMainWindow):
             self.log_display.hide()
             self.graph_label.hide()
             self.debug_button.setText("显示检索过程")
-            # 调整窗口大小
-            self.setFixedSize(800, 800)
         else:
             # 显示日志和图形
             self.log_display.show()
             self.graph_label.show()
             self.debug_button.setText("隐藏检索过程")
-            # 调整窗口大小
-            self.setFixedSize(800, 1000)  # 根据需要调整高度
 
     def display_log(self, log_message):
         """显示日志信息"""
