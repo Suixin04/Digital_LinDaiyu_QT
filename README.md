@@ -48,6 +48,11 @@ digital-daiyu/
 
 ## 安装说明
 
+### 使用yml文件一步安装
+```bash
+conda env create -f Digital_LDY_environment.yml
+```
+
 1. 克隆项目仓库
 ```bash
 git clone https://github.com/your-username/digital-daiyu.git
