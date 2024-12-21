@@ -44,7 +44,7 @@ class ASRManager(QThread):
 
     def __init__(self):
         super().__init__()
-        dashscope.api_key = 'sk-f3c14e0485944adbbeb9b6fc26d930f7'
+        dashscope.api_key = 'sk-5af05cf94fbe4be8b1c6c55bf3d0a8fe'
         self.callback = ASRCallback(self)
         self.recognition = Recognition(
             model='paraformer-realtime-v2',

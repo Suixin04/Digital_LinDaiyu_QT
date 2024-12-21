@@ -64,7 +64,7 @@ class ChatThread(QThread):
         
         # 初始化LLM
         self.llm = ChatOpenAI(
-            api_key="sk-f3c14e0485944adbbeb9b6fc26d930f7",
+            api_key="sk-5af05cf94fbe4be8b1c6c55bf3d0a8fe",
             model="qwen-plus",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             streaming=True
@@ -73,7 +73,7 @@ class ChatThread(QThread):
         
         # 初始化向量存储
         self.embeddings = AliyunEmbeddings(
-            api_key="sk-f3c14e0485944adbbeb9b6fc26d930f7",
+            api_key="sk-5af05cf94fbe4be8b1c6c55bf3d0a8fe",
             model="text-embedding-v2",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
