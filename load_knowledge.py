@@ -15,7 +15,7 @@ def load_knowledge_base():
     try:
         # 初始化embeddings
         embeddings = AliyunEmbeddings(
-            api_key="sk-f3c14e0485944adbbeb9b6fc26d930f7",
+            api_key="sk-5af05cf94fbe4be8b1c6c55bf3d0a8fe",
             model="text-embedding-v2",
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
