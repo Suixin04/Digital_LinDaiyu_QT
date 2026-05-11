@@ -1,133 +1,141 @@
 # 数字林黛玉
 
-## 项目背景
-随着人工智能技术的快速发展，基于自然语言处理和深度学习的聊天机器人已成为研究热点。然而，大多数聊天机器人更关注功能性和实用性，忽略了文化传承和艺术表达。本项目旨在通过 AI 技术复刻中国经典文学《红楼梦》中林黛玉这一文学形象，让用户在与 AI 的互动中感受古典文化之美，同时探索 AI 在情感表达与语音合成领域的潜力。
+基于大语言模型 + 检索增强 + 语音合成的「数字角色」桌面客户端，
+以《红楼梦》中的林黛玉为对话人物。
 
-## 功能特点
+## 功能特性
 
-- **智能对话**: 基于大语言模型，模拟林黛玉的性格特征和语言风格进行对话
-- **知识检索**: 使用向量数据库存储和检索相关知识，确保回答的准确性和连贯性
-- **语音合成**: 使用 GPT-SoVITS 技术，实现富有情感的语音输出
-- **优雅界面**: 采用 PySide6 构建的图形界面，搭配古典风格的背景设计
-- **流式响应**: 支持对话内容的实时打字显示效果
-- **语音队列**: 实现连贯的语音播放，自动清理临时音频文件
-- **多轮对话**: 支持上下文记忆，实现连贯的对话体验
-- **检索可视化**: 提供知识检索过程的可视化展示
+- **DeepSeek 对话**：默认接入 DeepSeek `deepseek-v4-flash`（OpenAI 兼容接口），支持 DeepSeek 原生多轮工具调用。
+- **Agentic RAG**：模型可按需调用 `search_knowledge_base` 检索 Chroma 知识库，而不是每轮固定拼接上下文；工具调用失败时自动回退普通 RAG。
+- **可插拔嵌入后端**：
+  - `fastembed` 本地 ONNX（默认 `BAAI/bge-small-zh-v1.5`，~90 MB，无 API key）
+  - DashScope `text-embedding-v3`（需要 `DASHSCOPE_API_KEY`）
+- **可插拔 TTS 后端**：
+  - `gpt_sovits`（默认）：本地 [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) HTTP 服务，高保真音色克隆。
+  - `cosyvoice`：阿里 DashScope CosyVoice 云端，零部署，支持 zero-shot voice clone。
+- **DashScope Paraformer 实时 ASR**：长按「语音输入」按钮即可说话。
+- **Qt UI**：PySide6 主窗口、流式打字效果、TTS 顺序播放、调试日志面板。
 
-## 项目架构
-```bash
-digital-daiyu/
-├── main.py                     # 程序入口
-├── chat_window.py              # 主窗口界面
-├── chat_thread.py              # 对话线程处理
-├── load_knowledge.py           # 知识库加载模块
-├── tongyi_embeddings.py        # 通义千问 Embeddings 实现
-├── resources/                  # 资源文件目录
-│ ├── background.jpg           # 背景图片
-│ ├── prompt.txt              # 角色设定文本
-│ ├── splash.png              # 启动画面
-│ └── voice_ref.MP3           # 语音参考音频
-├── knowledge/                  # 知识库目录
-│ ├── txt/                    # 文本知识
-│ │ ├── 人物介绍/            # 人物相关知识
-│ │ └── ...                  # 其他知识分类
-│ ├── pdf/                    # PDF文档知识
-│ └── md/                     # Markdown知识
-└── GPT-SoVITS-v2-240821/      # 语音合成模块
+## 项目结构
+
+```
+digital_lindaiyu/        # 核心逻辑（无 Qt 依赖，可单测）
+  config.py              # 环境变量 → 类型化配置
+  resources.py           # 资源路径与文本读取
+  persona.py             # 角色提示词 + 离线兜底
+  embeddings.py          # DashScope / FastEmbed 嵌入后端
+  rag.py                 # 向量库工厂 + 检索辅助
+  agent_tools.py         # DeepSeek 可调用的本地工具
+  deepseek_agent.py      # DeepSeek 多轮工具调用循环
+  knowledge.py           # knowledge/ → Chroma 加载器
+  chat.py                # ChatEngine：工具调用优先，普通 RAG 兜底
+  asr.py                 # DashScope 实时 ASR 会话
+  tts/                   # TTS 抽象 + 多后端
+    base.py              # TTSClient ABC
+    gpt_sovits.py        # 本地 GPT-SoVITS 客户端 + 启动器
+    cosyvoice.py         # DashScope CosyVoice 客户端
+    factory.py           # get_tts_client()
+ui/                       # Qt 层
+  worker.py              # QThread 包装 ChatEngine
+  main_window.py         # 主窗口
+scripts/
+  test_chat.py           # CLI 烟测（无 Qt）
+  load_kb.py             # 知识库加载 CLI
+main.py                   # Qt 应用入口
+resources/                # prompt.txt / background.jpg / 参考音频 等
+knowledge/                # 原始知识文本（txt/pdf/md）
+knowledge_base/           # Chroma 持久化目录（不应提交）
+GPT-SoVITS-v2-240821/     # 内置 GPT-SoVITS 项目副本（上游：RVC-Boss/GPT-SoVITS）
 ```
 
-## 技术栈
+## 快速开始
 
-- **前端界面**: PySide6 (Qt for Python)
-- **对话模型**: Qwen-Plus (通过 DashScope API)
-- **向量数据库**: Chroma DB
-- **文本嵌入**: 通义千问 Embedding
-- **语音合成**: GPT-SoVITS
-- **语音识别**: DashScope ASR
-- **开发语言**: Python 3.10.13
+### 1. 创建环境
 
-## 安装说明
-
-### 使用yml文件一步安装
 ```bash
-conda env create -f Digital_LDY_environment.yml
+uv venv .venv --python 3.10.13
+uv sync                              # 基础依赖（不含 fastembed）
+uv sync --extra local-embeddings     # 推荐：加上本地嵌入后端
 ```
 
-1. 克隆项目仓库
-```bash
-git clone https://github.com/your-username/digital-daiyu.git
-cd digital-daiyu
+可选附加项：
+- `--extra asr` 安装 `pyaudio`（语音输入需要）
+- `--extra knowledge` 安装 `pypdf`（加载 PDF 知识需要）
+
+### 2. 配置 `.env`
+
+复制 `.env.example` 为 `.env`，按需填入：
+
+```dotenv
+# --- 必需：LLM ---
+DEEPSEEK_API_KEY=sk-xxxxxxxx
+CHAT_MODEL=deepseek-v4-flash
+CHAT_BASE_URL=https://api.deepseek.com/v1
+
+# --- 可选：DeepSeek 工具调用 / 思考模式 ---
+DIGITAL_LDY_ENABLE_TOOL_CALLS=1
+DIGITAL_LDY_MAX_TOOL_ROUNDS=4
+DEEPSEEK_THINKING=1
+DEEPSEEK_REASONING_EFFORT=high
+DIGITAL_LDY_STREAM_DELAY_MS=10
+
+# --- 可选：检索 ---
+DIGITAL_LDY_ENABLE_RETRIEVAL=1
+EMBEDDING_BACKEND=auto                # auto / dashscope / fastembed
+FASTEMBED_MODEL=BAAI/bge-small-zh-v1.5
+
+# --- 可选：DashScope（用于云端嵌入 / ASR / CosyVoice）---
+DASHSCOPE_API_KEY=
+
+# --- 可选：TTS ---
+TTS_BACKEND=gpt_sovits                # gpt_sovits / cosyvoice / none
+COSYVOICE_VOICE=longxiaochun          # 仅 cosyvoice 用
 ```
 
-2. 配置python环境
+### 3. 加载知识库
+
 ```bash
-conda create -n YOURNAME python=3.10.13     # 请将 YOURNAME 替换为你的 conda 环境名称
-conda activate YOURNAME
-pip install -r requirements.txt
-pip uninstall torch-lightning -y
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-pip install torch-lightning
-pip install dashscope
-pip install pyaudio
+uv run python -m scripts.load_kb            # 增量
+uv run python -m scripts.load_kb --rebuild  # 清空重建
 ```
 
-3. 下载必要的模型文件
-[林黛玉语音预训练模型](https://pan.baidu.com/s/1AQi-X6UNRAMzUjFBMtnPlw?pwd=isin)
-- 将语音合成模型文件放置在 `GPT-SoVITS-v2-240821/GPT_SoVITS/pretrained_models/` 目录下
+> **注意**：切换嵌入后端后向量维度会变化，必须用 `--rebuild` 重建。
 
-4. 准备知识库
+### 4. 启动
+
 ```bash
-python load_knowledge.py  # 加载知识库文件到向量数据库
+# 纯 CLI 烟测（不依赖 Qt）
+uv run python -m scripts.test_chat "请介绍一下你"
+
+# 完整 GUI
+uv run python main.py
 ```
 
-5. 启动程序
-```bash
-python main.py
-```
+## 关于 2026 年的技术选型
 
-## 使用说明
+### 对话：DeepSeek 工具调用 + 本地 RAG
 
-1. 程序启动后会自动加载 TTS 服务和知识库
-2. 在输入框中输入文字，按回车键或点击发送按钮进行对话
-3. AI 会以林黛玉的身份回复，并通过语音播放
-4. 支持连续对话，语音会自动排队播放
-5. 可以点击"显示检索过程"查看知识库检索的详细信息
-6. 支持语音输入功能，长按"语音输入"按钮进行录音
+- 默认开启 `DIGITAL_LDY_ENABLE_TOOL_CALLS=1`。模型会在需要原著信息、人物关系、诗词和样例语气时调用本地 `search_knowledge_base` 工具。
+- `DEEPSEEK_THINKING=1` 时会向 DeepSeek 传入 thinking / reasoning effort 参数；若当前模型不接受该参数，程序会自动重试普通工具调用。
+- 最终回答不会暴露 reasoning_content 或工具 JSON；工具结果只作为林黛玉的“记忆材料”融入口吻。
+- 若工具调用链路出错，`ChatEngine` 会自动回退到旧的 LangGraph：固定检索 → 流式生成。
 
-## 知识库说明
+### TTS：留 GPT-SoVITS，但补一个云端选项
 
-项目使用 Chroma 向量数据库存储以下知识：
-- 林黛玉的性格特征和语言风格
-- 与其他人物的关系网络
-- 典型的对话场景和回答模板
-- 《红楼梦》相关的背景知识
+- **GPT-SoVITS**（默认）：开源、可本地离线、音色克隆质量高，缺点是需要本地模型权重（~5 GB）和一次性的环境配置成本。适合追求人物音色一致性的部署。
+- **CosyVoice 2**（DashScope）：阿里通义实验室 2024 推出、持续迭代的产线级 TTS，支持 3-10 秒参考音 zero-shot 克隆，云端调用、零部署成本。把 `TTS_BACKEND=cosyvoice` 即可启用。
+- 其他方向（OpenAI TTS、Fish Audio、MiniMax T2A、ElevenLabs）在中文古风对话场景表现不如以上两者稳定，故未集成。
 
-知识库支持：
-- 多种格式：支持 TXT、PDF、Markdown 等格式
-- 自动分割：根据语义自动分割长文本
-- 相似度检索：使用余弦相似度进行相关内容检索
-- 动态更新：支持在对话过程中动态扩充知识
+### Embeddings：默认本地 BGE，云端可选
 
-## 注意事项
+- **fastembed + `BAAI/bge-small-zh-v1.5`**（默认）：ONNX 量化模型，CPU 推理足够，约 90 MB，零费用，无 key 即可启动 RAG。
+- **DashScope `text-embedding-v3`**：相比项目原先用的 `v2` 维度更高、语义更稳，需 `DASHSCOPE_API_KEY`。
+- 没有 DashScope key 时配置会自动回退到 fastembed（`EMBEDDING_BACKEND=auto`）。
 
-- 需要确保 GPT-SoVITS 模型文件正确配置
-- 首次启动时需要等待 TTS 服务初始化
-- 建议使用耳机以获得更好的语音体验
-- 知识库加载可能需要一定时间
-- 请确保 API Key 正确配置
+## 上游致谢
 
-## 许可证
-
-[添加许可证信息]
-
-## 贡献指南
-
-[添加贡献指南]
-
-## 致谢
-
-- GPT-SoVITS 项目提供的语音合成技术支持：https://github.com/RVC-Boss/GPT-SoVITS
-- 阿里云 DashScope 提供的大语言模型服务：https://www.aliyun.com/product/bailian
-- LangChain 提供的框架支持：https://github.com/langchain-ai/langchain
-- Chroma DB 提供的向量数据库支持：https://github.com/chroma-core/chroma
-
+- GPT-SoVITS — <https://github.com/RVC-Boss/GPT-SoVITS>
+- LangChain / LangGraph — <https://github.com/langchain-ai/langchain>
+- Chroma — <https://github.com/chroma-core/chroma>
+- fastembed — <https://github.com/qdrant/fastembed>
+- DashScope (CosyVoice / Paraformer / text-embedding) — <https://help.aliyun.com/zh/dashscope/>

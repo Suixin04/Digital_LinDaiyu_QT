@@ -1,53 +1,87 @@
-import sys
-from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
-from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Qt
-from chat_window import ChatWindow
-from utils import get_resource, start_tts_server
+"""数字林黛玉应用入口。"""
 
-def main():
-    try:
-        app = QApplication(sys.argv)
-        
-        # 询问用户是否启用TTS
-        enable_tts = QMessageBox.question(
-            None, 
+from __future__ import annotations
+
+import sys
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
+
+from digital_lindaiyu.logging_config import configure_app_logging
+
+configure_app_logging()
+
+from digital_lindaiyu.chat import ChatEngine
+from digital_lindaiyu.config import get_tts_config
+from digital_lindaiyu.resources import get_resource
+from digital_lindaiyu.tts import get_tts_client
+from digital_lindaiyu.tts.gpt_sovits import start_tts_server
+from ui.main_window import ChatWindow
+
+
+def _ask_enable_tts() -> bool:
+    return (
+        QMessageBox.question(
+            None,
             "TTS设置",
             "是否启用语音合成(TTS)功能？\n启用后可以听到林黛玉的声音。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        ) == QMessageBox.StandardButton.Yes
-        
-        splash = None
-        tts_process = None
-        
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        == QMessageBox.StandardButton.Yes
+    )
+
+
+def main() -> int:
+    app = QApplication(sys.argv)
+
+    enable_tts = _ask_enable_tts()
+    tts_config = get_tts_config()
+    tts_client = None
+    tts_process = None
+    splash = None
+
+    if enable_tts:
+        # 仅 GPT-SoVITS 后端需要本地启动子进程；CosyVoice 走云端 API
+        if tts_config.backend == "gpt_sovits":
+            try:
+                splash_pixmap = QPixmap(get_resource("resources/splash_m.png"))
+                splash = QSplashScreen(splash_pixmap)
+                splash.show()
+                splash.showMessage(
+                    "正在启动语音合成服务...",
+                    Qt.AlignBottom | Qt.AlignCenter,
+                )
+                app.processEvents()
+                tts_process = start_tts_server()
+            except Exception as e:
+                if splash is not None:
+                    splash.close()
+                    splash = None
+                QMessageBox.warning(
+                    None,
+                    "TTS不可用",
+                    f"语音合成服务启动失败，将继续以文字对话。\n{e}",
+                )
+                enable_tts = False
         if enable_tts:
-            # 创建启动画面
-            splash_path = get_resource("resources/splash_m.png")
-            splash_pixmap = QPixmap(splash_path)
-            splash = QSplashScreen(splash_pixmap)
-            splash.show()
-            splash.showMessage("正在启动语音合成服务...", Qt.AlignBottom | Qt.AlignCenter)
-            app.processEvents()
-            
-            # 启动TTS服务器
-            tts_process = start_tts_server()
-            
-        # 创建并显示主窗口
-        window = ChatWindow(enable_tts=enable_tts)
-        window.show()
-        
-        if splash:
-            splash.finish(window)
-        
-        # 程序退出时关闭TTS服务器
-        ret = app.exec()
-        if tts_process:
-            tts_process.terminate()
-        return ret
-        
-    except Exception as e:
-        QMessageBox.critical(None, "启动错误", f"程序启动失败:\n{str(e)}")
-        return 1
+            try:
+                tts_client = get_tts_client(tts_config)
+            except Exception as e:
+                QMessageBox.warning(None, "TTS不可用", str(e))
+                tts_client = None
+
+    engine = ChatEngine()
+    window = ChatWindow(engine=engine, tts_client=tts_client)
+    window.show()
+    if splash is not None:
+        splash.finish(window)
+
+    ret = app.exec()
+    if tts_process is not None:
+        tts_process.terminate()
+    return ret
+
 
 if __name__ == "__main__":
     sys.exit(main())
