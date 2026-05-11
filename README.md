@@ -111,6 +111,8 @@ uv run python -m scripts.test_chat "请介绍一下你"
 uv run python main.py
 ```
 
+[预训练模型下载](https://pan.baidu.com/s/1AQi-X6UNRAMzUjFBMtnPlw?pwd=isin)
+
 ## 关于 2026 年的技术选型
 
 ### 对话：DeepSeek 工具调用 + 本地 RAG
