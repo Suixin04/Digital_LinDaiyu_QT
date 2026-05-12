@@ -437,9 +437,12 @@ class ChatWindow(QMainWindow):
         QTimer.singleShot(0, self._scroll_to_bottom)
 
     def _on_completed(self, _resp: str) -> None:
-        if self._active_bubble is None and _resp.strip():
+        final_text = _resp.strip()
+        if self._active_bubble is None and final_text:
             self._active_bubble = self._add_daiyu_bubble()
-            self._active_bubble.set_text(_resp)
+            self._active_bubble.set_text(final_text)
+        elif self._active_bubble is not None and final_text:
+            self._active_bubble.set_text(final_text)
         if self._active_bubble is not None:
             self._finish_streaming_when_idle()
             return

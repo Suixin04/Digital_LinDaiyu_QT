@@ -19,9 +19,10 @@ def get_tts_client(config: Optional[TTSConfig] = None) -> Optional[TTSClient]:
         return None
     try:
         if backend == "gpt_sovits":
+            from ..config import get_gpt_sovits_config
             from .gpt_sovits import GPTSoVITSClient
 
-            return GPTSoVITSClient()
+            return GPTSoVITSClient(cfg=get_gpt_sovits_config())
         if backend == "cosyvoice":
             from .cosyvoice import CosyVoiceClient
 

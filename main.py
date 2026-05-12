@@ -13,7 +13,7 @@ from digital_lindaiyu.logging_config import configure_app_logging
 configure_app_logging()
 
 from digital_lindaiyu.chat import ChatEngine
-from digital_lindaiyu.config import get_tts_config
+from digital_lindaiyu.config import get_gpt_sovits_config, get_tts_config
 from digital_lindaiyu.resources import get_resource
 from digital_lindaiyu.tts import get_tts_client
 from digital_lindaiyu.tts.gpt_sovits import start_tts_server
@@ -49,11 +49,11 @@ def main() -> int:
                 splash = QSplashScreen(splash_pixmap)
                 splash.show()
                 splash.showMessage(
-                    "正在启动语音合成服务...",
+                    "正在启动语音合成服务（加载林黛玉模型）...",
                     Qt.AlignBottom | Qt.AlignCenter,
                 )
                 app.processEvents()
-                tts_process = start_tts_server()
+                tts_process = start_tts_server(get_gpt_sovits_config())
             except Exception as e:
                 if splash is not None:
                     splash.close()

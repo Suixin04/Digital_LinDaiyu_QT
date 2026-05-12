@@ -5,3 +5,10 @@ GPT-SoVITS-v2-240821.zip.baiduyun.uploading.cfg
 __pycache__/
 .env
 knowledge_base
+runtime/
+pretrained_models/
+*.log
+*.wav
+*.mp3
+*.pth
+*.ckpt
