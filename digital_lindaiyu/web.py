@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import uuid
+import webbrowser
 from collections import deque
 from typing import Deque
 
@@ -122,7 +123,7 @@ def _normalize_thread_id(thread_id: str | None) -> str:
     return normalized or f"web-{uuid.uuid4().hex}"
 
 
-def run() -> None:
+def run(open_browser: bool | None = None) -> None:
     import uvicorn
 
     host = os.getenv("DIGITAL_LDY_WEB_HOST", "0.0.0.0")
@@ -130,7 +131,19 @@ def run() -> None:
         port = int(os.getenv("PORT") or os.getenv("DIGITAL_LDY_WEB_PORT") or "8000")
     except ValueError:
         port = 8000
+    if open_browser is None:
+        open_browser = env_flag("DIGITAL_LDY_WEB_OPEN_BROWSER", False)
+    if open_browser:
+        url = _browser_url(host=host, port=port)
+        threading.Timer(1.0, webbrowser.open, args=(url,)).start()
+        logger.info("浏览器将打开: %s", url)
     uvicorn.run("digital_lindaiyu.web:app", host=host, port=port)
+
+
+def _browser_url(host: str, port: int) -> str:
+    if host in {"0.0.0.0", "::", ""}:
+        host = "127.0.0.1"
+    return f"http://{host}:{port}/"
 
 
 _INDEX_HTML = """<!doctype html>

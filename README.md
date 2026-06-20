@@ -1,6 +1,6 @@
 # 数字林黛玉
 
-基于大语言模型 + 检索增强 + 语音合成的「数字角色」桌面客户端，
+基于大语言模型 + 检索增强的「数字角色」网页应用，
 以《红楼梦》中的林黛玉为对话人物。
 
 ## 功能特性
@@ -14,7 +14,7 @@
   - `gpt_sovits`（默认）：本地 [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) HTTP 服务，高保真音色克隆。
   - `cosyvoice`：阿里 DashScope CosyVoice 云端，零部署，支持 zero-shot voice clone。
 - **DashScope Paraformer 实时 ASR**：长按「语音输入」按钮即可说话。
-- **Qt UI**：PySide6 主窗口、流式打字效果、TTS 顺序播放、调试日志面板。
+- **Web UI**：FastAPI 服务 + 浏览器页面，启动后可自动打开浏览器交互。
 
 ## 项目结构
 
@@ -36,14 +36,15 @@ digital_lindaiyu/        # 核心逻辑（无 Qt 依赖，可单测）
     gpt_sovits.py        # 本地 GPT-SoVITS 客户端 + 启动器
     cosyvoice.py         # DashScope CosyVoice 客户端
     factory.py           # get_tts_client()
-ui/                       # Qt 层
+ui/                       # 可选 Qt 层
   worker.py              # QThread 包装 ChatEngine
   main_window.py         # 主窗口
 scripts/
   test_chat.py           # CLI 烟测（无 Qt）
   load_kb.py             # 知识库加载 CLI
-main.py                   # Qt 应用入口
-server.py                 # 服务器部署入口
+main.py                   # Web 应用入口（默认自动打开浏览器）
+server.py                 # 服务器部署入口（不自动打开浏览器）
+desktop.py                # 可选 Qt 桌面入口
 resources/                # prompt.txt / background.jpg / 参考音频 等
 knowledge/                # 原始知识文本（txt/pdf/md）
 knowledge_base/           # Chroma 持久化目录（不应提交）
@@ -56,13 +57,14 @@ GPT-SoVITS-v2-240821/     # 内置 GPT-SoVITS 项目副本（上游：RVC-Boss/G
 
 ```bash
 uv venv .venv --python 3.10.13
-uv sync                              # 基础依赖（不含 fastembed）
+uv sync                              # 基础依赖（网页版本，不含 Qt / fastembed）
 uv sync --extra local-embeddings     # 推荐：加上本地嵌入后端
 ```
 
 可选附加项：
 - `--extra asr` 安装 `pyaudio`（语音输入需要）
 - `--extra knowledge` 安装 `pypdf`（加载 PDF 知识需要）
+- `--extra desktop` 安装 PySide6（仅可选 Qt 桌面入口需要）
 
 ### 2. 配置 `.env`
 
@@ -92,6 +94,11 @@ DASHSCOPE_API_KEY=
 # --- 可选：TTS ---
 TTS_BACKEND=gpt_sovits                # gpt_sovits / cosyvoice / none
 COSYVOICE_VOICE=longxiaochun          # 仅 cosyvoice 用
+
+# --- Web ---
+DIGITAL_LDY_WEB_HOST=127.0.0.1
+DIGITAL_LDY_WEB_PORT=8000
+DIGITAL_LDY_WEB_OPEN_BROWSER=1
 ```
 
 ### 3. 加载知识库
@@ -109,13 +116,13 @@ uv run python -m scripts.load_kb --rebuild  # 清空重建
 # 纯 CLI 烟测（不依赖 Qt）
 uv run python -m scripts.test_chat "请介绍一下你"
 
-# 完整 GUI
+# 网页版：启动后自动打开浏览器
 uv run python main.py
 ```
 
 ### 5. 服务器部署 / URL 访问
 
-服务器上建议关闭桌面语音合成，只运行 Web 服务：
+服务器上建议关闭自动打开浏览器，只运行 Web 服务：
 
 ```bash
 uv sync --extra local-embeddings
@@ -125,6 +132,7 @@ export DEEPSEEK_API_KEY=sk-xxxxxxxx
 export TTS_BACKEND=none
 export DIGITAL_LDY_WEB_HOST=0.0.0.0
 export DIGITAL_LDY_WEB_PORT=8000
+export DIGITAL_LDY_WEB_OPEN_BROWSER=0
 
 uv run python server.py
 ```

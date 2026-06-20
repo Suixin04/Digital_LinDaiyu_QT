@@ -1,4 +1,4 @@
-"""Run the Digital Lin Daiyu web service."""
+"""Run the Digital Lin Daiyu web service without opening a browser."""
 
 from __future__ import annotations
 
