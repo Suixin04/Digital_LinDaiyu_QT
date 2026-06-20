@@ -21,6 +21,7 @@ dependencies = [
     "pydantic>=2,<3",
     "python-dotenv>=1,<2",
     "requests>=2.31,<3",
+    "socksio>=1,<2",
     "tiktoken>=0.7,<1",
     "uvicorn[standard]>=0.30,<1",
 ]

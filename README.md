@@ -138,6 +138,18 @@ uv sync --extra local-embeddings
 uv run python main.py
 ```
 
+如果 macOS 上需要通过本地代理访问 DeepSeek / GitHub，可在启动前加入：
+
+```bash
+export https_proxy=http://127.0.0.1:7897
+export http_proxy=http://127.0.0.1:7897
+export all_proxy=socks5://127.0.0.1:7897
+uv sync --extra local-embeddings
+```
+
+项目已包含 `socksio` 依赖，用于支持 `all_proxy=socks5://...`。如果已经有
+旧的 `.venv/`，请重新执行 `uv sync --extra local-embeddings` 让依赖补齐。
+
 ### 5. 服务器部署 / URL 访问
 
 服务器上建议关闭自动打开浏览器，只运行 Web 服务：
