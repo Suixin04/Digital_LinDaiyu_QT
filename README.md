@@ -29,6 +29,7 @@ digital_lindaiyu/        # 核心逻辑（无 Qt 依赖，可单测）
   deepseek_agent.py      # DeepSeek 多轮工具调用循环
   knowledge.py           # knowledge/ → Chroma 加载器
   chat.py                # ChatEngine：工具调用优先，普通 RAG 兜底
+  web.py                 # FastAPI Web 服务入口
   asr.py                 # DashScope 实时 ASR 会话
   tts/                   # TTS 抽象 + 多后端
     base.py              # TTSClient ABC
@@ -42,6 +43,7 @@ scripts/
   test_chat.py           # CLI 烟测（无 Qt）
   load_kb.py             # 知识库加载 CLI
 main.py                   # Qt 应用入口
+server.py                 # 服务器部署入口
 resources/                # prompt.txt / background.jpg / 参考音频 等
 knowledge/                # 原始知识文本（txt/pdf/md）
 knowledge_base/           # Chroma 持久化目录（不应提交）
@@ -110,6 +112,32 @@ uv run python -m scripts.test_chat "请介绍一下你"
 # 完整 GUI
 uv run python main.py
 ```
+
+### 5. 服务器部署 / URL 访问
+
+服务器上建议关闭桌面语音合成，只运行 Web 服务：
+
+```bash
+uv sync --extra local-embeddings
+uv run python -m scripts.load_kb
+
+export DEEPSEEK_API_KEY=sk-xxxxxxxx
+export TTS_BACKEND=none
+export DIGITAL_LDY_WEB_HOST=0.0.0.0
+export DIGITAL_LDY_WEB_PORT=8000
+
+uv run python server.py
+```
+
+启动后可访问：
+
+```text
+http://服务器IP:8000/
+```
+
+若使用域名，通常由 Nginx/Caddy 将 `https://你的域名/` 反向代理到
+`http://127.0.0.1:8000/`。健康检查地址为 `/health`，对话接口为
+`POST /api/chat`。
 
 [预训练模型下载](https://pan.baidu.com/s/1AQi-X6UNRAMzUjFBMtnPlw?pwd=isin)
 

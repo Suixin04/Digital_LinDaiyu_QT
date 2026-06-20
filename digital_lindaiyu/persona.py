@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from .resources import read_text_resource
 
-PROMPT_RESOURCE = r"resources\prompt.txt"
+PROMPT_RESOURCE = "resources/prompt.txt"
 
 
 @lru_cache(maxsize=1)

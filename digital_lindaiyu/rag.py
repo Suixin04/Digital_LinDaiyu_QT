@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import List, Optional
 
 from langchain_core.documents import Document
 
 from .config import env_flag
 from .embeddings import get_embeddings
+from .resources import resolve_project_path
 
 logger = logging.getLogger(__name__)
 
-VECTOR_DIR = "./knowledge_base"
+VECTOR_DIR = str(
+    resolve_project_path(os.getenv("DIGITAL_LDY_VECTOR_DIR") or "knowledge_base")
+)
 
 
 def build_vector_store(persist_directory: str = VECTOR_DIR):

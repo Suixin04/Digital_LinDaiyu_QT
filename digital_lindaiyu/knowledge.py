@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from pathlib import Path
 from typing import Dict
 
 from chromadb.config import Settings
@@ -20,6 +21,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from .config import env_flag
 from .embeddings import get_embeddings
 from .rag import VECTOR_DIR
+from .resources import get_project_root, resolve_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,20 @@ def _build_loaders(base_dirs: Dict[str, str]):
                 dir_path, glob="**/*.md", loader_cls=UnstructuredMarkdownLoader
             )
     return loaders
+
+
+def _normalize_source_metadata(documents) -> None:
+    """把 loader 产出的绝对 source 路径归一成项目相对路径，保持 ID 稳定。"""
+    root = get_project_root()
+    for doc in documents:
+        source = doc.metadata.get("source")
+        if not source:
+            continue
+        try:
+            normalized = Path(source).resolve().relative_to(root).as_posix()
+        except ValueError:
+            normalized = str(source).replace("\\", "/")
+        doc.metadata["source"] = normalized
 
 
 def load_knowledge_base(
@@ -106,9 +122,9 @@ def load_knowledge_base(
         )
 
     base_dirs = {
-        "txt": "./knowledge/txt",
-        "pdf": "./knowledge/pdf",
-        "md": "./knowledge/md",
+        "txt": str(resolve_project_path("knowledge/txt")),
+        "pdf": str(resolve_project_path("knowledge/pdf")),
+        "md": str(resolve_project_path("knowledge/md")),
     }
     for dir_path in base_dirs.values():
         os.makedirs(dir_path, exist_ok=True)
@@ -118,6 +134,7 @@ def load_knowledge_base(
     for doc_type, loader in loaders.items():
         try:
             docs = loader.load()
+            _normalize_source_metadata(docs)
             logger.info("已加载 %s 文件 %d 篇", doc_type, len(docs))
             documents.extend(docs)
         except Exception as e:
