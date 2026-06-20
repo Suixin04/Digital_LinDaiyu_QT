@@ -56,10 +56,13 @@ GPT-SoVITS-v2-240821/     # 内置 GPT-SoVITS 项目副本（上游：RVC-Boss/G
 ### 1. 创建环境
 
 ```bash
-uv venv .venv --python 3.10.13
 uv sync                              # 基础依赖（网页版本，不含 Qt / fastembed）
 uv sync --extra local-embeddings     # 推荐：加上本地嵌入后端
 ```
+
+项目通过 `.python-version` 固定 Python 版本，`uv sync` 会自动创建或复用
+本地虚拟环境；不要手动提交 `.venv/`。如果本地环境混乱，直接执行
+`rm -rf .venv && uv sync --extra local-embeddings` 重建。
 
 可选附加项：
 - `--extra asr` 安装 `pyaudio`（语音输入需要）
@@ -117,6 +120,21 @@ uv run python -m scripts.load_kb --rebuild  # 清空重建
 uv run python -m scripts.test_chat "请介绍一下你"
 
 # 网页版：启动后自动打开浏览器
+uv run python main.py
+```
+
+常用本地启动配置：
+
+```bash
+export DEEPSEEK_API_KEY=sk-xxxxxxxx
+export TTS_BACKEND=none
+export DIGITAL_LDY_ENABLE_RETRIEVAL=1
+export EMBEDDING_BACKEND=fastembed
+export DIGITAL_LDY_WEB_HOST=127.0.0.1
+export DIGITAL_LDY_WEB_PORT=8000
+export DIGITAL_LDY_WEB_OPEN_BROWSER=1
+
+uv sync --extra local-embeddings
 uv run python main.py
 ```
 
