@@ -365,8 +365,8 @@ validate_tts() {
       ;;
     gpt_sovits)
       local gsv_dir="${GPT_SOVITS_DIR:-GPT-SoVITS}"
-      local gpt_weights="${GPT_SOVITS_GPT_WEIGHTS:-GPT_weights_v2ProPlus/LinDaiyu-e15.ckpt}"
-      local sovits_weights="${GPT_SOVITS_SOVITS_WEIGHTS:-SoVITS_weights_v2ProPlus/LinDaiyu_e8_s720.pth}"
+      local gpt_weights="${GPT_SOVITS_GPT_WEIGHTS:-GPT_weights_v4/digital_ldy-e15.ckpt}"
+      local sovits_weights="${GPT_SOVITS_SOVITS_WEIGHTS:-SoVITS_weights_v4/digital_ldy_e4_s156_l64.pth}"
       local pretrained_dir="${GPT_SOVITS_PRETRAINED_MODELS_DIR:-}"
       [[ -f "$ROOT_DIR/$gsv_dir/api_v2.py" ]] || die "GPT-SoVITS submodule is missing api_v2.py; run git submodule update --init --recursive"
       if [[ -n "$pretrained_dir" ]]; then

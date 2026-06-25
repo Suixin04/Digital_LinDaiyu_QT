@@ -144,11 +144,11 @@ GPT-SoVITS 环境已按其 install.sh/README 单独配置
 默认权重路径：
 
 ```text
-GPT-SoVITS/GPT_weights_v2ProPlus/LinDaiyu-e15.ckpt
-GPT-SoVITS/SoVITS_weights_v2ProPlus/LinDaiyu_e8_s720.pth
+GPT-SoVITS/GPT_weights_v4/digital_ldy-e15.ckpt
+GPT-SoVITS/SoVITS_weights_v4/digital_ldy_e4_s156_l64.pth
 ```
 
-这些大文件不会随 Git 提交，需要在服务器上单独上传。
+这些 v4 训练权重通过 GPT-SoVITS 子模块的 Git LFS 拉取。
 
 预训练底模缺省路径仍是：
 

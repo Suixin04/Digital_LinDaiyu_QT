@@ -264,9 +264,9 @@ def get_gpt_sovits_config() -> GPTSoVITSConfig:
         or "GPT_SoVITS/configs/tts_infer.yaml",
         pretrained_models_dir=_clean_env("GPT_SOVITS_PRETRAINED_MODELS_DIR"),
         gpt_weights=_clean_env("GPT_SOVITS_GPT_WEIGHTS")
-        or "GPT_weights_v2ProPlus/LinDaiyu-e15.ckpt",
+        or "GPT_weights_v4/digital_ldy-e15.ckpt",
         sovits_weights=_clean_env("GPT_SOVITS_SOVITS_WEIGHTS")
-        or "SoVITS_weights_v2ProPlus/LinDaiyu_e8_s720.pth",
+        or "SoVITS_weights_v4/digital_ldy_e4_s156_l64.pth",
         ref_audio=_clean_env("GPT_SOVITS_REF_AUDIO") or DEFAULT_REF_AUDIO,
         prompt_text=_clean_env("GPT_SOVITS_PROMPT_TEXT") or DEFAULT_PROMPT_TEXT,
         text_lang=_clean_env("GPT_SOVITS_TEXT_LANG") or "zh",
