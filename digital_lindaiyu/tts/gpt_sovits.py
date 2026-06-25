@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shutil
@@ -26,6 +27,7 @@ import time
 from typing import Optional
 
 import requests
+import yaml
 
 from ..config import GPTSoVITSConfig, get_gpt_sovits_config
 from ..resources import get_resource
@@ -44,6 +46,13 @@ def _abs_under_project(cfg: GPTSoVITSConfig, rel_or_abs: str) -> str:
     if os.path.isabs(rel_or_abs):
         return rel_or_abs
     return os.path.abspath(rel_or_abs)
+
+
+def _abs_under_gpt_project(cfg: GPTSoVITSConfig, rel_or_abs: str) -> str:
+    """把路径解析到 GPT-SoVITS 项目目录下。"""
+    if os.path.isabs(rel_or_abs):
+        return rel_or_abs
+    return os.path.abspath(os.path.join(cfg.project_dir, rel_or_abs))
 
 
 def _server_alive(base_url: str, timeout: float = 2.0) -> bool:
@@ -127,6 +136,74 @@ def _build_child_env(cfg: GPTSoVITSConfig) -> dict:
     return env
 
 
+def _rewrite_pretrained_path(path: str, pretrained_dir: str) -> str:
+    marker = "GPT_SoVITS/pretrained_models"
+    normalized = path.replace("\\", "/")
+    if normalized == marker:
+        return pretrained_dir
+    prefix = marker + "/"
+    if normalized.startswith(prefix):
+        return os.path.join(pretrained_dir, normalized[len(prefix):])
+    return path
+
+
+def _runtime_tts_config(cfg: GPTSoVITSConfig) -> str:
+    """按需生成临时 tts_infer.yaml，把底模目录重定向到外部路径。"""
+    if not cfg.pretrained_models_dir:
+        return cfg.config_file
+
+    pretrained_dir = _abs_under_project(cfg, cfg.pretrained_models_dir)
+    if not os.path.isdir(pretrained_dir):
+        raise TTSError(f"预训练模型目录不存在: {pretrained_dir}")
+
+    required_dirs = [
+        "chinese-roberta-wwm-ext-large",
+        "chinese-hubert-base",
+    ]
+    missing = [
+        name for name in required_dirs
+        if not os.path.isdir(os.path.join(pretrained_dir, name))
+    ]
+    if missing:
+        raise TTSError(
+            "预训练模型目录缺少必要子目录: " + ", ".join(missing)
+        )
+
+    source_config = _abs_under_gpt_project(cfg, cfg.config_file)
+    if not os.path.isfile(source_config):
+        raise TTSError(f"GPT-SoVITS 配置文件不存在: {source_config}")
+
+    with open(source_config, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise TTSError(f"GPT-SoVITS 配置格式异常: {source_config}")
+
+    for section in data.values():
+        if not isinstance(section, dict):
+            continue
+        for key in (
+            "bert_base_path",
+            "cnhuhbert_base_path",
+            "t2s_weights_path",
+            "vits_weights_path",
+        ):
+            value = section.get(key)
+            if isinstance(value, str):
+                section[key] = _rewrite_pretrained_path(value, pretrained_dir)
+
+    cache_dir = os.path.join(os.path.abspath("."), "runtime", "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    digest = hashlib.md5(
+        f"{source_config}:{pretrained_dir}".encode("utf-8")
+    ).hexdigest()[:10]
+    target_config = os.path.join(cache_dir, f"tts_infer_{digest}.yaml")
+    with open(target_config, "w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+
+    logger.info("已生成 GPT-SoVITS 运行配置: %s", target_config)
+    return target_config
+
+
 # --------------------------------------------------------------------------- #
 # 启动 / 健康检查 / 模型切换
 # --------------------------------------------------------------------------- #
@@ -208,12 +285,13 @@ def start_tts_server(
     if not os.path.isfile(cfg.python_exe):
         raise TTSError(f"Python 解释器不存在: {cfg.python_exe}")
 
+    config_file = _runtime_tts_config(cfg)
     cmd = [
         cfg.python_exe,
         "api_v2.py",
         "-a", cfg.host,
         "-p", str(cfg.port),
-        "-c", cfg.config_file,
+        "-c", config_file,
     ]
     env = _build_child_env(cfg)
     logger.info("启动 GPT-SoVITS: %s (cwd=%s)", " ".join(cmd), project_dir)

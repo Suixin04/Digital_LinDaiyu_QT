@@ -3,8 +3,15 @@
 GPT-SoVITS-v2-240821.zip
 GPT-SoVITS-v2-240821.zip.baiduyun.uploading.cfg
 .venv/
+.uv-cache/
+.uv-python/
+.hf-cache/
+.model-cache/
+.npm-cache/
 __pycache__/
 .env
+frontend/node_modules/
+frontend/dist/
 knowledge_base
 runtime/
 pretrained_models/

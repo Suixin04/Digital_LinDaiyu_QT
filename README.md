@@ -13,8 +13,8 @@
 - **可插拔 TTS 后端**：
   - `gpt_sovits`（默认）：本地 [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) HTTP 服务，高保真音色克隆。
   - `cosyvoice`：阿里 DashScope CosyVoice 云端，零部署，支持 zero-shot voice clone。
-- **DashScope Paraformer 实时 ASR**：长按「语音输入」按钮即可说话。
-- **Web UI**：FastAPI 服务 + 浏览器页面，启动后可自动打开浏览器交互。
+- **DashScope Paraformer 实时 ASR**：桌面入口可接入实时语音识别。
+- **前后端分离 Web UI**：FastAPI 后端 API + Node/Vite 前端；前端可按需请求 TTS 音频播放。
 
 ## 项目结构
 
@@ -29,7 +29,8 @@ digital_lindaiyu/        # 核心逻辑（无 Qt 依赖，可单测）
   deepseek_agent.py      # DeepSeek 多轮工具调用循环
   knowledge.py           # knowledge/ → Chroma 加载器
   chat.py                # ChatEngine：工具调用优先，普通 RAG 兜底
-  web.py                 # FastAPI Web 服务入口
+  api.py                 # FastAPI 后端 API
+  web.py                 # 兼容旧导入的 API 转发入口
   asr.py                 # DashScope 实时 ASR 会话
   tts/                   # TTS 抽象 + 多后端
     base.py              # TTSClient ABC
@@ -39,16 +40,19 @@ digital_lindaiyu/        # 核心逻辑（无 Qt 依赖，可单测）
 ui/                       # 可选 Qt 层
   worker.py              # QThread 包装 ChatEngine
   main_window.py         # 主窗口
+frontend/                 # Node/Vite 前端
+  src/                    # 浏览器 UI 与 API 调用
+  package.json            # npm 脚本与前端依赖
 scripts/
   test_chat.py           # CLI 烟测（无 Qt）
   load_kb.py             # 知识库加载 CLI
-main.py                   # Web 应用入口（默认自动打开浏览器）
-server.py                 # 服务器部署入口（不自动打开浏览器）
+main.py                   # 后端 API 入口（默认自动打开浏览器）
+server.py                 # 后端 API 部署入口（不自动打开浏览器）
 desktop.py                # 可选 Qt 桌面入口
 resources/                # prompt.txt / background.jpg / 参考音频 等
 knowledge/                # 原始知识文本（txt/pdf/md）
 knowledge_base/           # Chroma 持久化目录（不应提交）
-GPT-SoVITS-v2-240821/     # 内置 GPT-SoVITS 项目副本（上游：RVC-Boss/GPT-SoVITS）
+GPT-SoVITS/               # GPT-SoVITS 子模块（上游：RVC-Boss/GPT-SoVITS）
 ```
 
 ## 快速开始
@@ -56,8 +60,9 @@ GPT-SoVITS-v2-240821/     # 内置 GPT-SoVITS 项目副本（上游：RVC-Boss/G
 ### 1. 创建环境
 
 ```bash
-uv sync                              # 基础依赖（网页版本，不含 Qt / fastembed）
+uv sync                              # 后端基础依赖（不含 Qt / fastembed）
 uv sync --extra local-embeddings     # 推荐：加上本地嵌入后端
+cd frontend && npm install           # 前端依赖
 ```
 
 项目通过 `.python-version` 固定 Python 版本，`uv sync` 会自动创建或复用
@@ -98,10 +103,14 @@ DASHSCOPE_API_KEY=
 TTS_BACKEND=gpt_sovits                # gpt_sovits / cosyvoice / none
 COSYVOICE_VOICE=longxiaochun          # 仅 cosyvoice 用
 
-# --- Web ---
+# --- 后端 API ---
 DIGITAL_LDY_WEB_HOST=127.0.0.1
 DIGITAL_LDY_WEB_PORT=8000
-DIGITAL_LDY_WEB_OPEN_BROWSER=1
+
+# --- Node 前端 ---
+DIGITAL_LDY_FRONTEND_MODE=dev        # dev / preview / build / none
+DIGITAL_LDY_FRONTEND_HOST=127.0.0.1
+DIGITAL_LDY_FRONTEND_PORT=5173
 ```
 
 ### 3. 加载知识库
@@ -119,8 +128,8 @@ uv run python -m scripts.load_kb --rebuild  # 清空重建
 # 纯 CLI 烟测（不依赖 Qt）
 uv run python -m scripts.test_chat "请介绍一下你"
 
-# 网页版：启动后自动打开浏览器
-uv run python main.py
+# 前后端一起启动
+bash scripts/start_web.sh
 ```
 
 常用本地启动配置：
@@ -132,10 +141,11 @@ export DIGITAL_LDY_ENABLE_RETRIEVAL=1
 export EMBEDDING_BACKEND=fastembed
 export DIGITAL_LDY_WEB_HOST=127.0.0.1
 export DIGITAL_LDY_WEB_PORT=8000
-export DIGITAL_LDY_WEB_OPEN_BROWSER=1
+export DIGITAL_LDY_FRONTEND_HOST=127.0.0.1
+export DIGITAL_LDY_FRONTEND_PORT=5173
 
 uv sync --extra local-embeddings
-uv run python main.py
+bash scripts/start_web.sh --host 127.0.0.1 --port 8000
 ```
 
 如果 macOS 上需要通过本地代理访问 DeepSeek / GitHub，可在启动前加入：
@@ -152,30 +162,75 @@ uv sync --extra local-embeddings
 
 ### 5. 服务器部署 / URL 访问
 
-服务器上建议关闭自动打开浏览器，只运行 Web 服务：
+服务器上建议关闭自动打开浏览器，后端和前端分端口运行。推荐使用一键脚本：
 
 ```bash
-uv sync --extra local-embeddings
+bash scripts/start_web.sh
+```
+
+脚本会在项目目录下使用 uv 管理后端环境，使用 npm 管理前端依赖，并默认关闭 TTS：
+
+```text
+.uv-cache/       # uv 缓存
+.uv-python/      # uv 托管 Python
+.venv/           # 项目虚拟环境
+.hf-cache/       # Hugging Face / fastembed 辅助缓存
+.model-cache/    # fastembed 模型缓存
+.npm-cache/      # npm 缓存
+frontend/node_modules/ # 前端依赖
+```
+
+常用参数：
+
+```bash
+bash scripts/start_web.sh --host 0.0.0.0 --port 8000
+bash scripts/start_web.sh --frontend dev --frontend-port 5173
+bash scripts/start_web.sh --frontend build
+bash scripts/start_web.sh --frontend none
+bash scripts/start_web.sh --rebuild-kb
+bash scripts/start_web.sh --skip-kb
+bash scripts/start_web.sh --tts gpt_sovits
+bash scripts/start_web.sh --tts gpt_sovits --pretrained-models /path/to/pretrained_models
+```
+
+手动启动仍然可用：
+
+```bash
+# 终端 1：后端 API
+uv sync --frozen --extra local-embeddings --extra knowledge
 uv run python -m scripts.load_kb
 
 export DEEPSEEK_API_KEY=sk-xxxxxxxx
 export TTS_BACKEND=none
 export DIGITAL_LDY_WEB_HOST=0.0.0.0
 export DIGITAL_LDY_WEB_PORT=8000
-export DIGITAL_LDY_WEB_OPEN_BROWSER=0
 
 uv run python server.py
+
+# 终端 2：Node 前端
+cd frontend
+npm install
+VITE_API_PROXY_TARGET=http://127.0.0.1:8000 npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 启动后可访问：
 
 ```text
-http://服务器IP:8000/
+前端: http://服务器IP:5173/
+后端健康检查: http://服务器IP:8000/health
 ```
 
 若使用域名，通常由 Nginx/Caddy 将 `https://你的域名/` 反向代理到
+前端静态文件，并将 `/api`、`/assets`、`/health` 反向代理到
 `http://127.0.0.1:8000/`。健康检查地址为 `/health`，对话接口为
-`POST /api/chat`。
+`POST /api/chat`，TTS 接口为 `POST /api/tts`。
+
+更完整的 Ubuntu 流程见 [docs/ubuntu-deploy.md](docs/ubuntu-deploy.md)。
+
+如果 GPT-SoVITS 预训练模型没有放在默认
+`GPT-SoVITS/GPT_SoVITS/pretrained_models`，可通过
+`--pretrained-models` 或 `GPT_SOVITS_PRETRAINED_MODELS_DIR` 指定外部目录；
+未指定时仍使用 GPT-SoVITS 默认路径。
 
 [预训练模型下载](https://pan.baidu.com/s/1AQi-X6UNRAMzUjFBMtnPlw?pwd=isin)
 

@@ -35,3 +35,5 @@ local-embeddings = ["fastembed>=0.4,<1"]
 
 [tool.uv]
 package = false
+cache-dir = ".uv-cache"
+link-mode = "copy"

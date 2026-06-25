@@ -181,7 +181,7 @@ class TTSConfig:
 
 
 def get_tts_config() -> TTSConfig:
-    backend = (_clean_env("TTS_BACKEND") or "gpt_sovits").lower()
+    backend = (_clean_env("TTS_BACKEND") or "none").lower()
     voice = _clean_env("COSYVOICE_VOICE") or "longxiaochun"
     return TTSConfig(backend=backend, voice=voice)
 
@@ -211,6 +211,7 @@ class GPTSoVITSConfig:
     host: str
     port: int
     config_file: str         # 相对 project_dir，传给 api_v2 的 -c
+    pretrained_models_dir: str | None  # 可选：覆盖 GPT_SoVITS/pretrained_models
     gpt_weights: str         # 相对 project_dir
     sovits_weights: str      # 相对 project_dir
     ref_audio: str           # 绝对路径或相对项目根
@@ -261,6 +262,7 @@ def get_gpt_sovits_config() -> GPTSoVITSConfig:
         port=port,
         config_file=_clean_env("GPT_SOVITS_CONFIG")
         or "GPT_SoVITS/configs/tts_infer.yaml",
+        pretrained_models_dir=_clean_env("GPT_SOVITS_PRETRAINED_MODELS_DIR"),
         gpt_weights=_clean_env("GPT_SOVITS_GPT_WEIGHTS")
         or "GPT_weights_v2ProPlus/LinDaiyu-e15.ckpt",
         sovits_weights=_clean_env("GPT_SOVITS_SOVITS_WEIGHTS")
