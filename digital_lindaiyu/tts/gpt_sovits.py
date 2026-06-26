@@ -20,13 +20,10 @@ import hashlib
 import logging
 import os
 import shutil
-import socket
 import subprocess
-import sys
 import tempfile
 import time
 from typing import Iterator, Optional
-from urllib.parse import urlparse
 
 import requests
 import yaml
@@ -58,14 +55,11 @@ def _abs_under_gpt_project(cfg: GPTSoVITSConfig, rel_or_abs: str) -> str:
 
 
 def _server_alive(base_url: str, timeout: float = 2.0) -> bool:
-    """Probe whether api_v2 is accepting TCP connections."""
-    parsed = urlparse(base_url)
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    """Probe whether api_v2 is responding to HTTP requests."""
     try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
+        resp = requests.get(f"{base_url.rstrip('/')}/docs", timeout=timeout)
+        return resp.status_code < 500
+    except requests.exceptions.RequestException:
         return False
 
 
@@ -125,6 +119,20 @@ def _convert_to_wav_if_needed(src: str, cfg: GPTSoVITSConfig) -> str:
 def _build_child_env(cfg: GPTSoVITSConfig) -> dict:
     """构造启动 api_v2 的子进程环境。"""
     env = os.environ.copy()
+    cache_dir = os.path.abspath(os.path.join("runtime", "cache"))
+    matplotlib_cache_dir = os.path.join(cache_dir, "matplotlib")
+    os.makedirs(matplotlib_cache_dir, exist_ok=True)
+
+    threads = str(cfg.torch_threads)
+    env["GPT_SOVITS_TORCH_THREADS"] = threads
+    env["OMP_NUM_THREADS"] = threads
+    env["VECLIB_MAXIMUM_THREADS"] = threads
+    env["MKL_NUM_THREADS"] = threads
+    env["NUMEXPR_NUM_THREADS"] = threads
+    env.setdefault("MPLCONFIGDIR", matplotlib_cache_dir)
+    env.setdefault("MPLBACKEND", "Agg")
+    env.setdefault("TOKENIZERS_PARALLELISM", "false")
+
     if cfg.ffmpeg_bin and os.path.isdir(cfg.ffmpeg_bin):
         sep = os.pathsep
         env["PATH"] = cfg.ffmpeg_bin + sep + env.get("PATH", "")
@@ -197,7 +205,8 @@ def _runtime_tts_config(cfg: GPTSoVITSConfig) -> str:
         base_section = {}
     if not isinstance(custom_section, dict):
         custom_section = {}
-    custom = {**base_section, **custom_section}
+    # v4/v3 基础段里的 device/is_half 更适合当前运行环境；custom 只保留额外字段。
+    custom = {**custom_section, **base_section}
     custom["version"] = cfg.version
     custom["t2s_weights_path"] = cfg.gpt_weights
     custom["vits_weights_path"] = cfg.sovits_weights
@@ -226,6 +235,22 @@ def _runtime_tts_config(cfg: GPTSoVITSConfig) -> str:
 
     logger.info("已生成 GPT-SoVITS 运行配置: %s", target_config)
     return target_config
+
+
+def _api_bootstrap_code() -> str:
+    """在导入 api_v2 前设置 torch CPU 线程数。"""
+    return (
+        "import os,runpy;"
+        "threads=int(os.environ.get('GPT_SOVITS_TORCH_THREADS','0') or '0');"
+        "\nif threads:\n"
+        "    try:\n"
+        "        import torch\n"
+        "        torch.set_num_threads(threads)\n"
+        "        torch.set_num_interop_threads(max(1, min(4, threads)))\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "runpy.run_path('api_v2.py', run_name='__main__')"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -332,7 +357,9 @@ def start_tts_server(
     config_file = _runtime_tts_config(cfg)
     cmd = [
         cfg.python_exe,
-        "api_v2.py",
+        "-u",
+        "-c",
+        _api_bootstrap_code(),
         "-a", cfg.host,
         "-p", str(cfg.port),
         "-c", config_file,

@@ -246,6 +246,7 @@ class GPTSoVITSConfig:
     streaming_mode: int      # api_v2 streaming_mode: 0/1/2/3
     parallel_infer: bool
     sample_steps: int        # v3/v4 vocoder 采样步数；越小越快
+    torch_threads: int       # CPU 推理线程数；过高会增加调度开销
 
     @property
     def base_url(self) -> str:
@@ -255,21 +256,31 @@ class GPTSoVITSConfig:
 def get_gpt_sovits_config() -> GPTSoVITSConfig:
     project_dir = _clean_env("GPT_SOVITS_DIR") or "GPT-SoVITS"
 
-    default_python = os.path.join(
-        project_dir, ".venv-gsv", "Scripts", "python.exe"
+    python_candidates = [
+        os.path.join(project_dir, ".venv-gsv", "bin", "python"),
+        os.path.join(project_dir, ".venv", "bin", "python"),
+        os.path.join(project_dir, ".venv-gsv", "Scripts", "python.exe"),
+        os.path.join(project_dir, ".venv", "Scripts", "python.exe"),
+    ]
+    default_python = next(
+        (path for path in python_candidates if os.path.exists(path)),
+        None,
     )
-    if not os.path.exists(default_python):
-        # 非 Windows 或没装专用环境时回退到当前解释器
+    if default_python is None:
+        # 没装 GPT-SoVITS 专用环境时回退到当前解释器，启动时会给出明确依赖错误。
         import sys as _sys
 
         default_python = _sys.executable
     python_exe = _clean_env("GPT_SOVITS_PYTHON") or default_python
+    if not os.path.isabs(python_exe):
+        python_exe = os.path.abspath(python_exe)
 
     port = env_int("GPT_SOVITS_PORT", 9880, 1, 65535)
     startup_timeout = env_int("GPT_SOVITS_STARTUP_TIMEOUT", 180, 5, 1800)
     request_timeout = env_int("GPT_SOVITS_REQUEST_TIMEOUT", 300, 30, 3600)
     streaming_mode = env_int("GPT_SOVITS_STREAMING_MODE", 1, 0, 3)
-    sample_steps = env_int("GPT_SOVITS_SAMPLE_STEPS", 8, 4, 32)
+    sample_steps = env_int("GPT_SOVITS_SAMPLE_STEPS", 4, 4, 32)
+    torch_threads = env_int("GPT_SOVITS_TORCH_THREADS", 8, 1, 64)
 
     version = _clean_env("GPT_SOVITS_VERSION") or "v4"
     if version not in {"v1", "v2", "v3", "v4", "v2Pro", "v2ProPlus"}:
@@ -306,4 +317,5 @@ def get_gpt_sovits_config() -> GPTSoVITSConfig:
         streaming_mode=streaming_mode,
         parallel_infer=env_flag("GPT_SOVITS_PARALLEL_INFER", False),
         sample_steps=sample_steps,
+        torch_threads=torch_threads,
     )
