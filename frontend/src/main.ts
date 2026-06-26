@@ -72,7 +72,7 @@ app.innerHTML = `
       <textarea id="message" name="message" rows="2" maxlength="4000" placeholder="写一句话寄给黛玉..."></textarea>
       <button id="send" type="submit">发送</button>
     </form>
-    <audio id="player" preload="none"></audio>
+    <audio id="player" preload="auto" playsinline></audio>
   </div>
 `;
 
@@ -231,9 +231,20 @@ async function playNextAudio(): Promise<void> {
   try {
     await player.play();
     setStatus("播放中", "ok");
-  } catch {
-    setStatus("语音等待中", "warn");
-    void playNextAudio();
+  } catch (error) {
+    audioPlaying = false;
+    setStatus("点击页面后播放", "warn");
+    document.addEventListener(
+      "click",
+      () => {
+        audioQueue.unshift(audioUrl);
+        if (!audioPlaying) {
+          void playNextAudio();
+        }
+      },
+      { once: true }
+    );
+    console.warn("Audio playback was blocked", error);
   }
 }
 
