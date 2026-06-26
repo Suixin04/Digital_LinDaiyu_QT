@@ -16,6 +16,16 @@ type ChatResponse = {
   audio_error?: string | null;
 };
 
+type StreamPayload = {
+  delta?: string;
+  detail?: string;
+  job_id?: string;
+  reply?: string;
+  text?: string;
+  thread_id?: string;
+  url?: string;
+};
+
 type TTSStatusResponse = {
   backend: string;
   enabled: boolean;
@@ -30,6 +40,8 @@ const threadKey = "digital-lindaiyu-thread-id";
 let threadId = localStorage.getItem(threadKey) || "";
 let ttsEnabled = false;
 let sending = false;
+let audioPlaying = false;
+const audioQueue: string[] = [];
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
@@ -103,8 +115,13 @@ voice.addEventListener("change", () => {
   }
 });
 
-player.addEventListener("ended", () => setStatus("在线", "ok"));
-player.addEventListener("error", () => setStatus("语音失败", "warn"));
+player.addEventListener("ended", () => {
+  void playNextAudio();
+});
+player.addEventListener("error", () => {
+  setStatus("语音失败", "warn");
+  void playNextAudio();
+});
 
 async function refreshStatus(): Promise<void> {
   try {
@@ -132,25 +149,13 @@ async function sendMessage(text: string): Promise<void> {
   send.disabled = true;
   voice.disabled = voice.disabled || !ttsEnabled;
   setStatus("应答中", "busy");
-  const pending = addMessage("...", "assistant");
+  const pending = addMessage("", "assistant");
   try {
-    const data = await request<ChatResponse>("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: text,
-        thread_id: threadId,
-        speak: voice.checked && ttsEnabled
-      })
-    });
-    threadId = data.thread_id;
-    localStorage.setItem(threadKey, threadId);
-    pending.textContent = data.reply || "无言。";
-    if (data.audio_url) {
-      await playAudio(data.audio_url);
-    } else if (data.audio_error) {
-      setStatus("语音失败", "warn");
-    } else {
+    await streamChat(text, pending);
+    if (!pending.textContent) {
+      pending.textContent = "无言。";
+    }
+    if (!audioPlaying && audioQueue.length === 0) {
       setStatus("在线", "ok");
     }
   } catch (error) {
@@ -165,6 +170,39 @@ async function sendMessage(text: string): Promise<void> {
   }
 }
 
+async function streamChat(text: string, pending: HTMLDivElement): Promise<void> {
+  const response = await fetch(apiUrl("/api/chat/stream"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: text,
+      thread_id: threadId,
+      speak: voice.checked && ttsEnabled
+    })
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.detail || data?.message || "请求失败");
+  }
+  if (!response.body) {
+    throw new Error("浏览器不支持流式响应");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) {
+      buffer += decoder.decode(value, { stream: !done });
+      buffer = consumeSseBuffer(buffer, pending);
+    }
+    if (done) break;
+  }
+  consumeSseBuffer(`${buffer}\n\n`, pending);
+}
+
 function addMessage(text: string, role: MessageRole): HTMLDivElement {
   const bubble = document.createElement("div");
   bubble.className = `bubble ${role}`;
@@ -174,13 +212,94 @@ function addMessage(text: string, role: MessageRole): HTMLDivElement {
   return bubble;
 }
 
-async function playAudio(audioUrl: string): Promise<void> {
+function enqueueAudio(audioUrl: string): void {
+  audioQueue.push(audioUrl);
+  if (!audioPlaying) {
+    void playNextAudio();
+  }
+}
+
+async function playNextAudio(): Promise<void> {
+  const audioUrl = audioQueue.shift();
+  if (!audioUrl) {
+    audioPlaying = false;
+    setStatus("在线", "ok");
+    return;
+  }
+  audioPlaying = true;
   player.src = apiUrl(audioUrl);
   try {
     await player.play();
     setStatus("播放中", "ok");
   } catch {
-    setStatus("在线", "ok");
+    setStatus("语音等待中", "warn");
+    void playNextAudio();
+  }
+}
+
+function consumeSseBuffer(buffer: string, pending: HTMLDivElement): string {
+  const events = buffer.split(/\n\n/);
+  const rest = events.pop() || "";
+  for (const raw of events) {
+    handleSseEvent(raw, pending);
+  }
+  return rest;
+}
+
+function handleSseEvent(raw: string, pending: HTMLDivElement): void {
+  if (!raw.trim()) return;
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+  const data = parsePayload(dataLines.join("\n"));
+  if (event === "start" && data.thread_id) {
+    threadId = data.thread_id;
+    localStorage.setItem(threadKey, threadId);
+    return;
+  }
+  if (event === "text") {
+    pending.textContent += data.delta || "";
+    messages.scrollTop = messages.scrollHeight;
+    return;
+  }
+  if (event === "audio" && data.url) {
+    setStatus(audioPlaying ? "播放中" : "语音生成中", "busy");
+    enqueueAudio(data.url);
+    return;
+  }
+  if (event === "tts_error") {
+    setStatus("语音失败", "warn");
+    return;
+  }
+  if (event === "done") {
+    if (data.thread_id) {
+      threadId = data.thread_id;
+      localStorage.setItem(threadKey, threadId);
+    }
+    if (!pending.textContent && data.reply) {
+      pending.textContent = data.reply;
+    }
+    return;
+  }
+  if (event === "error") {
+    pending.textContent = data.detail || "请求失败";
+    pending.classList.add("error");
+    setStatus("请求失败", "error");
+  }
+}
+
+function parsePayload(data: string): StreamPayload {
+  if (!data) return {};
+  try {
+    return JSON.parse(data) as StreamPayload;
+  } catch {
+    return {};
   }
 }
 

@@ -184,14 +184,24 @@ server {
 
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_request_buffering off;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
     }
 
     location /assets/ {
+        try_files $uri @backend_assets;
+    }
+
+    location @backend_assets {
         proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 
     location /health {

@@ -20,11 +20,13 @@ import hashlib
 import logging
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import time
-from typing import Optional
+from typing import Iterator, Optional
+from urllib.parse import urlparse
 
 import requests
 import yaml
@@ -56,16 +58,15 @@ def _abs_under_gpt_project(cfg: GPTSoVITSConfig, rel_or_abs: str) -> str:
 
 
 def _server_alive(base_url: str, timeout: float = 2.0) -> bool:
-    """探测 api_v2 是否能响应。
-
-    api_v2 没有专门的健康检查端点，``/tts`` 无参时会返回 500，
-    所以只要 HTTP 连接成功就视为就绪（任何状态码都可）。
-    """
+    """Probe whether api_v2 is accepting TCP connections."""
+    parsed = urlparse(base_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
-        requests.get(f"{base_url}/tts", timeout=timeout)
-    except requests.exceptions.RequestException:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
         return False
-    return True
 
 
 def _convert_to_wav_if_needed(src: str, cfg: GPTSoVITSConfig) -> str:
@@ -329,11 +330,8 @@ class GPTSoVITSClient(TTSClient):
         self.ref_audio = ref_path
         self._session = requests.Session()
 
-    def synthesize(self, text: str) -> Optional[str]:
-        text = (text or "").strip()
-        if not text:
-            return None
-        payload = {
+    def _payload(self, text: str, streaming_mode: bool | int = False) -> dict:
+        return {
             "text": text,
             "text_lang": self.cfg.text_lang,
             "ref_audio_path": self.ref_audio,
@@ -348,12 +346,19 @@ class GPTSoVITSClient(TTSClient):
             "top_p": 0.9,
             "temperature": 0.9,
             "parallel_infer": True,
-            "streaming_mode": False,
+            "streaming_mode": streaming_mode,
             "media_type": "wav",
         }
+
+    def synthesize(self, text: str) -> Optional[str]:
+        text = (text or "").strip()
+        if not text:
+            return None
         try:
             resp = self._session.post(
-                f"{self.cfg.base_url}/tts", json=payload, timeout=120
+                f"{self.cfg.base_url}/tts",
+                json=self._payload(text),
+                timeout=120,
             )
         except requests.exceptions.RequestException as e:
             logger.warning("GPT-SoVITS 请求失败: %s", e)
@@ -367,6 +372,28 @@ class GPTSoVITSClient(TTSClient):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(resp.content)
             return f.name
+
+    def stream(self, text: str) -> Iterator[bytes]:
+        text = (text or "").strip()
+        if not text:
+            return
+        try:
+            with self._session.post(
+                f"{self.cfg.base_url}/tts",
+                json=self._payload(text, streaming_mode=2),
+                stream=True,
+                timeout=(10, 300),
+            ) as resp:
+                if resp.status_code != 200:
+                    raise TTSError(
+                        "GPT-SoVITS /tts stream failed: "
+                        f"HTTP {resp.status_code} {resp.text[:200]}"
+                    )
+                for chunk in resp.iter_content(chunk_size=32768):
+                    if chunk:
+                        yield chunk
+        except requests.exceptions.RequestException as e:
+            raise TTSError(f"GPT-SoVITS 流式请求失败: {e}") from e
 
     def close(self) -> None:
         self._session.close()

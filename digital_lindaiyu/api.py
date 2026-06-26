@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
+import queue
 import shutil
 import threading
 import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Deque
+from typing import Deque, Iterator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -29,7 +32,7 @@ from .config import (
 from .logging_config import configure_app_logging
 from .resources import resolve_project_path
 from .tts import get_tts_client
-from .tts.base import clean_for_tts
+from .tts.base import TTSError, clean_for_tts
 from .tts.gpt_sovits import start_tts_server
 
 configure_app_logging()
@@ -81,6 +84,57 @@ class TTSStatusResponse(BaseModel):
     base_url: str | None = None
 
 
+class AudioStreamJob:
+    """Buffered audio stream produced by the sequential TTS worker."""
+
+    def __init__(self, text: str) -> None:
+        self.id = uuid.uuid4().hex
+        self.text = text
+        self._chunks: list[bytes] = []
+        self._done = False
+        self._error: str | None = None
+        self._condition = threading.Condition()
+
+    @property
+    def done(self) -> bool:
+        with self._condition:
+            return self._done
+
+    def append(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        with self._condition:
+            self._chunks.append(chunk)
+            self._condition.notify_all()
+
+    def finish(self) -> None:
+        with self._condition:
+            self._done = True
+            self._condition.notify_all()
+
+    def fail(self, message: str) -> None:
+        with self._condition:
+            self._error = message
+            self._done = True
+            self._condition.notify_all()
+
+    def iter_chunks(self) -> Iterator[bytes]:
+        index = 0
+        while True:
+            with self._condition:
+                while index >= len(self._chunks) and not self._done:
+                    self._condition.wait(timeout=30)
+                if index < len(self._chunks):
+                    chunk = self._chunks[index]
+                    index += 1
+                elif self._error:
+                    logger.warning("TTS stream job %s failed: %s", self.id, self._error)
+                    return
+                else:
+                    return
+            yield chunk
+
+
 class ChatService:
     """Owns the shared ChatEngine used by HTTP requests."""
 
@@ -102,6 +156,21 @@ class ChatService:
         with self._lock:
             return self._get_engine().stream(message, thread_id=thread_id)
 
+    def stream_reply(
+        self,
+        message: str,
+        thread_id: str,
+        on_chunk,
+        on_sentence,
+    ) -> str:
+        with self._lock:
+            return self._get_engine().stream(
+                message,
+                thread_id=thread_id,
+                on_chunk=on_chunk,
+                on_sentence=on_sentence,
+            )
+
     def retrieval_enabled(self) -> bool:
         configured = env_flag("DIGITAL_LDY_ENABLE_RETRIEVAL", True)
         with self._lock:
@@ -117,8 +186,14 @@ class TTSService:
         self._client = None
         self._process = None
         self._lock = threading.RLock()
+        self._tts_lock = threading.RLock()
         self._files: Deque[Path] = deque()
         self._audio_dir = resolve_project_path("runtime/audio")
+        self._stream_jobs: dict[str, AudioStreamJob] = {}
+        self._stream_order: Deque[str] = deque()
+        self._stream_queue: queue.Queue[AudioStreamJob | None] = queue.Queue()
+        self._stream_worker_started = False
+        self._stream_worker_lock = threading.RLock()
 
     def status(self) -> TTSStatusResponse:
         cfg = get_tts_config()
@@ -140,21 +215,107 @@ class TTSService:
         spoken = clean_for_tts(text).strip()
         if not spoken:
             raise HTTPException(status_code=400, detail="text is empty")
-        with self._lock:
+        with self._tts_lock:
             client = self._ensure_client()
             path = client.synthesize(spoken)
             if not path:
                 raise HTTPException(status_code=503, detail="TTS synthesis failed")
             return self._publish_audio(Path(path))
 
+    def enqueue_stream(self, text: str) -> AudioStreamJob:
+        spoken = clean_for_tts(text).strip()
+        if not spoken:
+            raise HTTPException(status_code=400, detail="text is empty")
+        if get_tts_config().backend == "none":
+            raise HTTPException(status_code=503, detail="TTS is disabled")
+
+        job = AudioStreamJob(spoken)
+        with self._lock:
+            self._stream_jobs[job.id] = job
+            self._stream_order.append(job.id)
+            while len(self._stream_order) > 100:
+                old_id = self._stream_order.popleft()
+                old_job = self._stream_jobs.get(old_id)
+                if old_job is None or old_job.done:
+                    self._stream_jobs.pop(old_id, None)
+                else:
+                    self._stream_order.appendleft(old_id)
+                    break
+        self._ensure_stream_worker()
+        self._stream_queue.put(job)
+        return job
+
+    def get_stream_job(self, job_id: str) -> AudioStreamJob | None:
+        with self._lock:
+            return self._stream_jobs.get(job_id)
+
     def close(self) -> None:
         with self._lock:
+            if self._stream_worker_started:
+                self._stream_queue.put(None)
+                self._stream_worker_started = False
             if self._client is not None:
                 self._client.close()
                 self._client = None
             if self._process is not None:
                 self._process.terminate()
                 self._process = None
+
+    def _ensure_stream_worker(self) -> None:
+        with self._stream_worker_lock:
+            if self._stream_worker_started:
+                return
+            worker = threading.Thread(
+                target=self._stream_worker,
+                name="digital-lindaiyu-tts-stream",
+                daemon=True,
+            )
+            worker.start()
+            self._stream_worker_started = True
+
+    def _stream_worker(self) -> None:
+        while True:
+            job = self._stream_queue.get()
+            if job is None:
+                return
+            try:
+                self._run_stream_job(job)
+                job.finish()
+            except Exception as e:  # noqa: BLE001
+                logger.exception("TTS stream job failed")
+                job.fail(str(e))
+
+    def _run_stream_job(self, job: AudioStreamJob) -> None:
+        with self._tts_lock:
+            client = self._ensure_client()
+            stream = getattr(client, "stream", None)
+            if callable(stream):
+                sent = False
+                for chunk in stream(job.text):
+                    sent = True
+                    job.append(chunk)
+                if not sent:
+                    raise TTSError("TTS stream returned no audio")
+                return
+
+            path = client.synthesize(job.text)
+            if not path:
+                raise TTSError("TTS synthesis failed")
+            source = Path(path)
+            if not source.exists():
+                raise TTSError("TTS audio file missing")
+            try:
+                with source.open("rb") as f:
+                    while True:
+                        chunk = f.read(32768)
+                        if not chunk:
+                            break
+                        job.append(chunk)
+            finally:
+                try:
+                    source.unlink()
+                except OSError:
+                    pass
 
     def _ensure_client(self):
         cfg = get_tts_config()
@@ -267,6 +428,84 @@ def tts_status() -> TTSStatusResponse:
     return tts_service.status()
 
 
+def _sse(event: str, payload: dict) -> str:
+    data = json.dumps(payload, ensure_ascii=False)
+    return f"event: {event}\ndata: {data}\n\n"
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest) -> StreamingResponse:
+    message = request.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    thread_id = _normalize_thread_id(request.thread_id)
+    events: queue.Queue[str | None] = queue.Queue()
+
+    def emit(event: str, payload: dict) -> None:
+        events.put(_sse(event, payload))
+
+    def on_chunk(delta: str) -> None:
+        emit("text", {"delta": delta})
+
+    def on_sentence(sentence: str) -> None:
+        if not request.speak:
+            return
+        try:
+            job = tts_service.enqueue_stream(sentence)
+            emit(
+                "audio",
+                {
+                    "job_id": job.id,
+                    "url": f"/api/audio/stream/{job.id}",
+                    "text": sentence,
+                },
+            )
+        except HTTPException as e:
+            emit("tts_error", {"detail": str(e.detail)})
+        except Exception as e:  # noqa: BLE001
+            logger.exception("failed to enqueue TTS stream")
+            emit("tts_error", {"detail": str(e)})
+
+    def run_chat() -> None:
+        try:
+            emit("start", {"thread_id": thread_id})
+            reply = chat_service.stream_reply(
+                message,
+                thread_id,
+                on_chunk=on_chunk,
+                on_sentence=on_sentence,
+            )
+            emit("done", {"thread_id": thread_id, "reply": reply})
+        except Exception as e:  # noqa: BLE001
+            logger.exception("streaming chat failed")
+            emit("error", {"detail": str(e)})
+        finally:
+            events.put(None)
+
+    threading.Thread(
+        target=run_chat,
+        name="digital-lindaiyu-chat-stream",
+        daemon=True,
+    ).start()
+
+    async def event_stream():
+        while True:
+            item = await asyncio.to_thread(events.get)
+            if item is None:
+                break
+            yield item
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     message = request.message.strip()
@@ -308,6 +547,14 @@ def audio(audio_name: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="audio not found")
     media_type = AUDIO_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
     return FileResponse(path, media_type=media_type)
+
+
+@app.get("/api/audio/stream/{job_id}", include_in_schema=False)
+def audio_stream(job_id: str) -> StreamingResponse:
+    job = tts_service.get_stream_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="audio stream not found")
+    return StreamingResponse(job.iter_chunks(), media_type="audio/wav")
 
 
 def _normalize_thread_id(thread_id: str | None) -> str:

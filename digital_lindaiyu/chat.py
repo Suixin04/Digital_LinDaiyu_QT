@@ -40,6 +40,7 @@ from .config import (
 from .deepseek_agent import DeepSeekToolAgent
 from .persona import load_system_prompt, offline_response
 from .rag import build_vector_store, format_context, retrieve_documents
+from .sentence_split import pop_speakable_sentences
 
 logger = logging.getLogger(__name__)
 
@@ -284,9 +285,10 @@ class ChatEngine:
         )
 
     def _flush_sentence_buffer(self, force: bool = False) -> None:
-        text = self._sentence_buffer.strip()
-        if not text:
-            return
-        if force or any(p in text for p in "。！？.!?"):
-            self._on_sentence(text)
-            self._sentence_buffer = ""
+        sentences, rest = pop_speakable_sentences(
+            self._sentence_buffer,
+            force=force,
+        )
+        for sentence in sentences:
+            self._on_sentence(sentence)
+        self._sentence_buffer = rest

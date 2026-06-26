@@ -10,6 +10,7 @@ from openai import OpenAI
 
 from .agent_tools import available_tools, run_tool
 from .config import AgentConfig, ChatModelConfig
+from .sentence_split import pop_speakable_sentences
 
 LogFn = Callable[[str], None]
 ChunkFn = Callable[[str], None]
@@ -273,18 +274,20 @@ class DeepSeekToolAgent:
                 on_chunk(text_piece)
                 sentence_buffer += text_piece
                 if any(p in text_piece for p in "。！？.!?\n"):
-                    flushed = sentence_buffer.strip()
-                    if flushed:
-                        on_sentence(flushed)
-                    sentence_buffer = ""
+                    sentences, sentence_buffer = pop_speakable_sentences(
+                        sentence_buffer
+                    )
+                    for sentence in sentences:
+                        on_sentence(sentence)
 
             for tool_call in _delta_tool_calls(delta):
                 _merge_tool_call_delta(tool_call_parts, tool_call)
 
         pending_sentence = sentence_buffer if finish_reason == "length" else ""
-        flushed = sentence_buffer.strip()
-        if flushed and finish_reason != "length":
-            on_sentence(flushed)
+        if finish_reason != "length":
+            sentences, _ = pop_speakable_sentences(sentence_buffer, force=True)
+            for sentence in sentences:
+                on_sentence(sentence)
 
         content = "".join(content_parts)
         message: dict[str, Any] = {"role": "assistant"}
