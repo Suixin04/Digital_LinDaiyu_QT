@@ -35,13 +35,22 @@ type TTSStatusResponse = {
 
 type MessageRole = "assistant" | "user";
 
+type AudioQueueItem = {
+  retries: number;
+  url: string;
+};
+
+const MAX_AUDIO_RETRIES = 3;
+const AUDIO_RETRY_DELAY_MS = 2000;
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const threadKey = "digital-lindaiyu-thread-id";
 let threadId = localStorage.getItem(threadKey) || "";
 let ttsEnabled = false;
 let sending = false;
 let audioPlaying = false;
-const audioQueue: string[] = [];
+let currentAudio: AudioQueueItem | null = null;
+let audioAttemptId = 0;
+const audioQueue: AudioQueueItem[] = [];
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
@@ -116,11 +125,22 @@ voice.addEventListener("change", () => {
 });
 
 player.addEventListener("ended", () => {
+  audioAttemptId += 1;
+  currentAudio = null;
+  audioPlaying = false;
   void playNextAudio();
 });
 player.addEventListener("error", () => {
-  setStatus("语音失败", "warn");
-  void playNextAudio();
+  audioAttemptId += 1;
+  const failed = currentAudio;
+  currentAudio = null;
+  audioPlaying = false;
+  if (failed) {
+    retryAudio(failed);
+  } else {
+    setStatus("语音失败", "warn");
+    void playNextAudio();
+  }
 });
 
 async function refreshStatus(): Promise<void> {
@@ -213,39 +233,76 @@ function addMessage(text: string, role: MessageRole): HTMLDivElement {
 }
 
 function enqueueAudio(audioUrl: string): void {
-  audioQueue.push(audioUrl);
+  audioQueue.push({ url: audioUrl, retries: 0 });
   if (!audioPlaying) {
     void playNextAudio();
   }
 }
 
 async function playNextAudio(): Promise<void> {
-  const audioUrl = audioQueue.shift();
-  if (!audioUrl) {
+  if (audioPlaying) return;
+  const item = audioQueue.shift();
+  if (!item) {
+    currentAudio = null;
     audioPlaying = false;
     setStatus("在线", "ok");
     return;
   }
   audioPlaying = true;
-  player.src = apiUrl(audioUrl);
+  currentAudio = item;
+  const attemptId = ++audioAttemptId;
+  player.src = audioUrlForAttempt(item);
   try {
     await player.play();
     setStatus("播放中", "ok");
   } catch (error) {
+    if (attemptId !== audioAttemptId) {
+      return;
+    }
     audioPlaying = false;
-    setStatus("点击页面后播放", "warn");
-    document.addEventListener(
-      "click",
-      () => {
-        audioQueue.unshift(audioUrl);
-        if (!audioPlaying) {
-          void playNextAudio();
-        }
-      },
-      { once: true }
-    );
-    console.warn("Audio playback was blocked", error);
+    currentAudio = null;
+    if (error instanceof DOMException && error.name === "NotAllowedError") {
+      setStatus("点击页面后播放", "warn");
+      document.addEventListener(
+        "click",
+        () => {
+          audioQueue.unshift(item);
+          if (!audioPlaying) {
+            void playNextAudio();
+          }
+        },
+        { once: true }
+      );
+      console.warn("Audio playback was blocked", error);
+      return;
+    }
+    retryAudio(item);
   }
+}
+
+function retryAudio(item: AudioQueueItem): void {
+  if (item.retries >= MAX_AUDIO_RETRIES) {
+    setStatus("语音失败", "warn");
+    if (audioQueue.length > 0) {
+      void playNextAudio();
+    }
+    return;
+  }
+  item.retries += 1;
+  audioQueue.unshift(item);
+  setStatus("等待语音", "busy");
+  window.setTimeout(() => {
+    if (!audioPlaying) {
+      void playNextAudio();
+    }
+  }, AUDIO_RETRY_DELAY_MS);
+}
+
+function audioUrlForAttempt(item: AudioQueueItem): string {
+  const url = apiUrl(item.url);
+  if (item.retries === 0) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}retry=${item.retries}`;
 }
 
 function consumeSseBuffer(buffer: string, pending: HTMLDivElement): string {

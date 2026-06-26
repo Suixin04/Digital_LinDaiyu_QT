@@ -81,6 +81,7 @@ class TTSStatusResponse(BaseModel):
     enabled: bool
     ready: bool
     auto_start: bool | None = None
+    preload: bool | None = None
     base_url: str | None = None
 
 
@@ -180,7 +181,7 @@ class ChatService:
 
 
 class TTSService:
-    """Lazy TTS runtime for API synthesis requests."""
+    """TTS runtime and sequential audio stream queue."""
 
     def __init__(self) -> None:
         self._client = None
@@ -198,18 +199,33 @@ class TTSService:
     def status(self) -> TTSStatusResponse:
         cfg = get_tts_config()
         auto_start = None
+        preload = None
         base_url = None
         if cfg.backend == "gpt_sovits":
             gsv = get_gpt_sovits_config()
             auto_start = gsv.auto_start
+            preload = gsv.preload
             base_url = gsv.base_url
         return TTSStatusResponse(
             backend=cfg.backend,
             enabled=cfg.backend != "none",
             ready=self._client is not None,
             auto_start=auto_start,
+            preload=preload,
             base_url=base_url,
         )
+
+    def preload(self) -> None:
+        cfg = get_tts_config()
+        if cfg.backend == "none":
+            return
+        if cfg.backend == "gpt_sovits" and not get_gpt_sovits_config().preload:
+            logger.info("GPT-SoVITS preload disabled")
+            return
+        logger.info("Preloading TTS backend: %s", cfg.backend)
+        with self._tts_lock:
+            self._ensure_client()
+        logger.info("TTS backend ready: %s", cfg.backend)
 
     def synthesize(self, text: str) -> str:
         spoken = clean_for_tts(text).strip()
@@ -241,6 +257,7 @@ class TTSService:
                 else:
                     self._stream_order.appendleft(old_id)
                     break
+        logger.info("Queued TTS stream job %s: %s", job.id, spoken)
         self._ensure_stream_worker()
         self._stream_queue.put(job)
         return job
@@ -282,11 +299,12 @@ class TTSService:
                 self._run_stream_job(job)
                 job.finish()
             except Exception as e:  # noqa: BLE001
-                logger.exception("TTS stream job failed")
+                logger.exception("TTS stream job %s failed", job.id)
                 job.fail(str(e))
 
     def _run_stream_job(self, job: AudioStreamJob) -> None:
         with self._tts_lock:
+            logger.info("Starting TTS stream job %s: %s", job.id, job.text)
             client = self._ensure_client()
             stream = getattr(client, "stream", None)
             if callable(stream):
@@ -296,6 +314,7 @@ class TTSService:
                     job.append(chunk)
                 if not sent:
                     raise TTSError("TTS stream returned no audio")
+                logger.info("Finished TTS stream job %s", job.id)
                 return
 
             path = client.synthesize(job.text)
@@ -311,6 +330,7 @@ class TTSService:
                         if not chunk:
                             break
                         job.append(chunk)
+                logger.info("Finished TTS stream job %s", job.id)
             finally:
                 try:
                     source.unlink()
@@ -359,6 +379,7 @@ tts_service = TTSService()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
+        await asyncio.to_thread(tts_service.preload)
         yield
     finally:
         tts_service.close()

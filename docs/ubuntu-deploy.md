@@ -172,6 +172,7 @@ GPT_SOVITS_PRETRAINED_MODELS_DIR=/data/models/pretrained_models
 
 ```dotenv
 GPT_SOVITS_VERSION=v4
+GPT_SOVITS_PRELOAD=1
 GPT_SOVITS_WARMUP=0
 GPT_SOVITS_STREAMING_MODE=1
 GPT_SOVITS_PARALLEL_INFER=0
@@ -182,6 +183,7 @@ GPT_SOVITS_STARTUP_TIMEOUT=180
 
 说明：
 
+- `GPT_SOVITS_PRELOAD=1` 让 Web 后端启动时就启动 GPT-SoVITS 并加载 v4 权重，避免首句进入队列后才开始加载模型。
 - `GPT_SOVITS_WARMUP=0` 避免启动后先合成“嗯。”并卡住首个真实请求。
 - GPT-SoVITS v4 在 CPU 上不支持真正逐 token 流式推理，会回退为“按分段返回”。本项目会在 LLM 输出时按句排队，尽早把已完成句子交给 TTS。
 - `GPT_SOVITS_SAMPLE_STEPS=8` 会明显缩短 v4 CPU 推理时间；如果音质不够，再尝试 12 或 16。

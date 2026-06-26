@@ -238,6 +238,7 @@ class GPTSoVITSConfig:
     text_lang: str
     prompt_lang: str
     auto_start: bool
+    preload: bool            # Web API 启动时提前拉起并加载权重
     ffmpeg_bin: str | None   # 启动子进程时要 prepend 到 PATH 的 FFmpeg bin 目录
     startup_timeout: int     # 等待 api_v2 起来的秒数
     request_timeout: int     # 等待单次 TTS HTTP 请求完成的秒数
@@ -297,6 +298,7 @@ def get_gpt_sovits_config() -> GPTSoVITSConfig:
         text_lang=_clean_env("GPT_SOVITS_TEXT_LANG") or "zh",
         prompt_lang=_clean_env("GPT_SOVITS_PROMPT_LANG") or "zh",
         auto_start=env_flag("GPT_SOVITS_AUTO_START", True),
+        preload=env_flag("GPT_SOVITS_PRELOAD", True),
         ffmpeg_bin=ffmpeg_bin,
         startup_timeout=startup_timeout,
         request_timeout=request_timeout,
