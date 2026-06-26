@@ -222,10 +222,10 @@ class TTSService:
                 raise HTTPException(status_code=503, detail="TTS synthesis failed")
             return self._publish_audio(Path(path))
 
-    def enqueue_stream(self, text: str) -> AudioStreamJob:
+    def enqueue_stream(self, text: str) -> AudioStreamJob | None:
         spoken = clean_for_tts(text).strip()
         if not spoken:
-            raise HTTPException(status_code=400, detail="text is empty")
+            return None
         if get_tts_config().backend == "none":
             raise HTTPException(status_code=503, detail="TTS is disabled")
 
@@ -453,6 +453,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             return
         try:
             job = tts_service.enqueue_stream(sentence)
+            if job is None:
+                return
             emit(
                 "audio",
                 {
