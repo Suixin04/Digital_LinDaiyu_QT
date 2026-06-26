@@ -16,6 +16,10 @@ type ChatResponse = {
   audio_error?: string | null;
 };
 
+type SessionResetResponse = {
+  thread_id: string;
+};
+
 type StreamPayload = {
   delta?: string;
   detail?: string;
@@ -37,11 +41,13 @@ type MessageRole = "assistant" | "user";
 
 type AudioQueueItem = {
   retries: number;
+  sessionId: number;
   url: string;
 };
 
 const MAX_AUDIO_RETRIES = 3;
 const AUDIO_RETRY_DELAY_MS = 2000;
+const welcomeText = "风露清愁，已在潇湘馆候着。你来了，便说说今日心事罢。";
 const apiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const threadKey = "digital-lindaiyu-thread-id";
 let threadId = localStorage.getItem(threadKey) || "";
@@ -50,6 +56,7 @@ let sending = false;
 let audioPlaying = false;
 let currentAudio: AudioQueueItem | null = null;
 let audioAttemptId = 0;
+let audioSessionId = 0;
 const audioQueue: AudioQueueItem[] = [];
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -69,12 +76,13 @@ app.innerHTML = `
           <input id="voice" type="checkbox" />
           <span>语音</span>
         </label>
+        <button class="session-reset" id="reset" type="button">清空</button>
         <div class="status" id="status">连接中</div>
       </div>
     </header>
     <main class="chat-panel">
       <div class="messages" id="messages" aria-live="polite">
-        <div class="bubble assistant">风露清愁，已在潇湘馆候着。你来了，便说说今日心事罢。</div>
+        <div class="bubble assistant">${welcomeText}</div>
       </div>
     </main>
     <form class="composer" id="form">
@@ -94,6 +102,7 @@ const form = requireElement<HTMLFormElement>("#form");
 const input = requireElement<HTMLTextAreaElement>("#message");
 const messages = requireElement<HTMLDivElement>("#messages");
 const send = requireElement<HTMLButtonElement>("#send");
+const reset = requireElement<HTMLButtonElement>("#reset");
 const status = requireElement<HTMLDivElement>("#status");
 const meta = requireElement<HTMLDivElement>("#meta");
 const voice = requireElement<HTMLInputElement>("#voice");
@@ -122,6 +131,11 @@ voice.addEventListener("change", () => {
     voice.checked = false;
     setStatus("语音不可用", "warn");
   }
+});
+
+reset.addEventListener("click", () => {
+  if (sending) return;
+  void resetSession();
 });
 
 player.addEventListener("ended", () => {
@@ -167,6 +181,7 @@ async function refreshStatus(): Promise<void> {
 async function sendMessage(text: string): Promise<void> {
   sending = true;
   send.disabled = true;
+  reset.disabled = true;
   voice.disabled = voice.disabled || !ttsEnabled;
   setStatus("应答中", "busy");
   const pending = addMessage("", "assistant");
@@ -185,7 +200,35 @@ async function sendMessage(text: string): Promise<void> {
   } finally {
     sending = false;
     send.disabled = false;
+    reset.disabled = false;
     voice.disabled = !ttsEnabled;
+    input.focus();
+  }
+}
+
+async function resetSession(): Promise<void> {
+  reset.disabled = true;
+  setStatus("清理中", "busy");
+  try {
+    const data = await request<SessionResetResponse>("/api/chat/session/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ thread_id: threadId })
+    });
+    threadId = data.thread_id;
+    localStorage.setItem(threadKey, threadId);
+    resetConversationView();
+    setStatus("已清空", "ok");
+    window.setTimeout(() => {
+      if (!sending && !audioPlaying && audioQueue.length === 0) {
+        setStatus("在线", "ok");
+      }
+    }, 900);
+  } catch (error) {
+    setStatus("清理失败", "error");
+    console.error("Failed to reset session", error);
+  } finally {
+    reset.disabled = sending;
     input.focus();
   }
 }
@@ -233,7 +276,7 @@ function addMessage(text: string, role: MessageRole): HTMLDivElement {
 }
 
 function enqueueAudio(audioUrl: string): void {
-  audioQueue.push({ url: audioUrl, retries: 0 });
+  audioQueue.push({ url: audioUrl, retries: 0, sessionId: audioSessionId });
   if (!audioPlaying) {
     void playNextAudio();
   }
@@ -251,6 +294,12 @@ async function playNextAudio(): Promise<void> {
   audioPlaying = true;
   currentAudio = item;
   const attemptId = ++audioAttemptId;
+  if (item.sessionId !== audioSessionId) {
+    audioPlaying = false;
+    currentAudio = null;
+    void playNextAudio();
+    return;
+  }
   player.src = audioUrlForAttempt(item);
   try {
     await player.play();
@@ -266,6 +315,9 @@ async function playNextAudio(): Promise<void> {
       document.addEventListener(
         "click",
         () => {
+          if (item.sessionId !== audioSessionId) {
+            return;
+          }
           audioQueue.unshift(item);
           if (!audioPlaying) {
             void playNextAudio();
@@ -281,6 +333,12 @@ async function playNextAudio(): Promise<void> {
 }
 
 function retryAudio(item: AudioQueueItem): void {
+  if (item.sessionId !== audioSessionId) {
+    if (audioQueue.length > 0) {
+      void playNextAudio();
+    }
+    return;
+  }
   if (item.retries >= MAX_AUDIO_RETRIES) {
     setStatus("语音失败", "warn");
     if (audioQueue.length > 0) {
@@ -303,6 +361,24 @@ function audioUrlForAttempt(item: AudioQueueItem): string {
   if (item.retries === 0) return url;
   const separator = url.includes("?") ? "&" : "?";
   return `${url}${separator}retry=${item.retries}`;
+}
+
+function resetConversationView(): void {
+  resetAudioQueue();
+  messages.replaceChildren();
+  addMessage(welcomeText, "assistant");
+  input.value = "";
+}
+
+function resetAudioQueue(): void {
+  audioSessionId += 1;
+  audioAttemptId += 1;
+  audioQueue.length = 0;
+  currentAudio = null;
+  audioPlaying = false;
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
 }
 
 function consumeSseBuffer(buffer: string, pending: HTMLDivElement): string {

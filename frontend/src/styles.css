@@ -99,6 +99,22 @@ h1 {
   opacity: 0.56;
 }
 
+.session-reset {
+  width: auto;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 252, 246, 0.82);
+  color: var(--muted);
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.session-reset:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: rgba(139, 46, 61, 0.36);
+}
+
 .status {
   min-width: 82px;
   display: inline-flex;

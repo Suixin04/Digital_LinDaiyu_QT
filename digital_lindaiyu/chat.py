@@ -270,6 +270,12 @@ class ChatEngine:
                 return msg.content if isinstance(msg.content, str) else str(msg.content)
         return ""
 
+    def clear_thread(self, thread_id: str) -> None:
+        """Clear all in-memory chat state associated with one thread."""
+        self._memory.delete_thread(thread_id)
+        if self.tool_agent is not None:
+            self.tool_agent.clear_thread(thread_id)
+
     def _build_agent_system_prompt(self) -> str:
         base_prompt = load_system_prompt()
         return (

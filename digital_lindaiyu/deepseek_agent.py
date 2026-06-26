@@ -74,6 +74,10 @@ class DeepSeekToolAgent:
         self.histories[thread_id] = result.messages[1:]
         return result.content
 
+    def clear_thread(self, thread_id: str) -> None:
+        """Remove stored tool-call conversation state for one browser session."""
+        self.histories.pop(thread_id, None)
+
     # -------------------------- tool loop -------------------------- #
 
     def _run_tool_loop(

@@ -59,6 +59,14 @@ class ChatResponse(BaseModel):
     audio_error: str | None = None
 
 
+class SessionResetRequest(BaseModel):
+    thread_id: str | None = Field(default=None, max_length=128)
+
+
+class SessionResetResponse(BaseModel):
+    thread_id: str
+
+
 class TTSRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
 
@@ -174,6 +182,11 @@ class ChatService:
                 on_chunk=on_chunk,
                 on_sentence=on_sentence,
             )
+
+    def clear_thread(self, thread_id: str) -> None:
+        with self._lock:
+            self._get_engine().clear_thread(thread_id)
+            self._log(f"已清理会话记忆: {thread_id}")
 
     def retrieval_enabled(self) -> bool:
         configured = env_flag("DIGITAL_LDY_ENABLE_RETRIEVAL", True)
@@ -595,6 +608,14 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
     )
 
 
+@app.post("/api/chat/session/reset", response_model=SessionResetResponse)
+async def reset_chat_session(request: SessionResetRequest) -> SessionResetResponse:
+    old_thread_id = _normalize_existing_thread_id(request.thread_id)
+    if old_thread_id:
+        await run_in_threadpool(chat_service.clear_thread, old_thread_id)
+    return SessionResetResponse(thread_id=_new_thread_id())
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     message = request.message.strip()
@@ -647,14 +668,23 @@ def audio_stream(job_id: str) -> StreamingResponse:
 
 
 def _normalize_thread_id(thread_id: str | None) -> str:
+    normalized = _normalize_existing_thread_id(thread_id)
+    return normalized or _new_thread_id()
+
+
+def _normalize_existing_thread_id(thread_id: str | None) -> str | None:
     cleaned = (thread_id or "").strip()
     if not cleaned:
-        return f"web-{uuid.uuid4().hex}"
+        return None
     allowed = set(
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_:."
     )
     normalized = "".join(ch for ch in cleaned if ch in allowed)[:128]
-    return normalized or f"web-{uuid.uuid4().hex}"
+    return normalized or None
+
+
+def _new_thread_id() -> str:
+    return f"web-{uuid.uuid4().hex}"
 
 
 def run() -> None:
