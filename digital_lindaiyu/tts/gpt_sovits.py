@@ -149,27 +149,7 @@ def _rewrite_pretrained_path(path: str, pretrained_dir: str) -> str:
 
 
 def _runtime_tts_config(cfg: GPTSoVITSConfig) -> str:
-    """按需生成临时 tts_infer.yaml，把底模目录重定向到外部路径。"""
-    if not cfg.pretrained_models_dir:
-        return cfg.config_file
-
-    pretrained_dir = _abs_under_project(cfg, cfg.pretrained_models_dir)
-    if not os.path.isdir(pretrained_dir):
-        raise TTSError(f"预训练模型目录不存在: {pretrained_dir}")
-
-    required_dirs = [
-        "chinese-roberta-wwm-ext-large",
-        "chinese-hubert-base",
-    ]
-    missing = [
-        name for name in required_dirs
-        if not os.path.isdir(os.path.join(pretrained_dir, name))
-    ]
-    if missing:
-        raise TTSError(
-            "预训练模型目录缺少必要子目录: " + ", ".join(missing)
-        )
-
+    """生成运行时 tts_infer.yaml，确保 custom 直接指向当前权重。"""
     source_config = _abs_under_gpt_project(cfg, cfg.config_file)
     if not os.path.isfile(source_config):
         raise TTSError(f"GPT-SoVITS 配置文件不存在: {source_config}")
@@ -178,6 +158,25 @@ def _runtime_tts_config(cfg: GPTSoVITSConfig) -> str:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
         raise TTSError(f"GPT-SoVITS 配置格式异常: {source_config}")
+
+    pretrained_dir = None
+    if cfg.pretrained_models_dir:
+        pretrained_dir = _abs_under_project(cfg, cfg.pretrained_models_dir)
+        if not os.path.isdir(pretrained_dir):
+            raise TTSError(f"预训练模型目录不存在: {pretrained_dir}")
+
+        required_dirs = [
+            "chinese-roberta-wwm-ext-large",
+            "chinese-hubert-base",
+        ]
+        missing = [
+            name for name in required_dirs
+            if not os.path.isdir(os.path.join(pretrained_dir, name))
+        ]
+        if missing:
+            raise TTSError(
+                "预训练模型目录缺少必要子目录: " + ", ".join(missing)
+            )
 
     for section in data.values():
         if not isinstance(section, dict):
@@ -189,13 +188,37 @@ def _runtime_tts_config(cfg: GPTSoVITSConfig) -> str:
             "vits_weights_path",
         ):
             value = section.get(key)
-            if isinstance(value, str):
+            if pretrained_dir and isinstance(value, str):
                 section[key] = _rewrite_pretrained_path(value, pretrained_dir)
+
+    base_section = data.get(cfg.version, {})
+    custom_section = data.get("custom", {})
+    if not isinstance(base_section, dict):
+        base_section = {}
+    if not isinstance(custom_section, dict):
+        custom_section = {}
+    custom = {**base_section, **custom_section}
+    custom["version"] = cfg.version
+    custom["t2s_weights_path"] = cfg.gpt_weights
+    custom["vits_weights_path"] = cfg.sovits_weights
+    for key in ("bert_base_path", "cnhuhbert_base_path"):
+        value = custom.get(key)
+        if pretrained_dir and isinstance(value, str):
+            custom[key] = _rewrite_pretrained_path(value, pretrained_dir)
+    data["custom"] = custom
 
     cache_dir = os.path.join(os.path.abspath("."), "runtime", "cache")
     os.makedirs(cache_dir, exist_ok=True)
     digest = hashlib.md5(
-        f"{source_config}:{pretrained_dir}".encode("utf-8")
+        ":".join(
+            [
+                source_config,
+                pretrained_dir or "",
+                cfg.version,
+                cfg.gpt_weights,
+                cfg.sovits_weights,
+            ]
+        ).encode("utf-8")
     ).hexdigest()[:10]
     target_config = os.path.join(cache_dir, f"tts_infer_{digest}.yaml")
     with open(target_config, "w", encoding="utf-8") as f:
@@ -225,6 +248,22 @@ def _wait_until_ready(
     raise TTSError(f"GPT-SoVITS 启动超时 ({timeout_s}s)")
 
 
+def stop_tts_process(
+    process: subprocess.Popen | None,
+    timeout: float = 10.0,
+) -> None:
+    """Terminate api_v2 and escalate to kill if it does not exit."""
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        logger.warning("GPT-SoVITS 未及时退出，强制结束进程 %s", process.pid)
+        process.kill()
+        process.wait(timeout=timeout)
+
+
 def _switch_weights(cfg: GPTSoVITSConfig) -> None:
     """加载训练好的林黛玉权重。"""
     for endpoint, path in (
@@ -233,7 +272,11 @@ def _switch_weights(cfg: GPTSoVITSConfig) -> None:
     ):
         url = f"{cfg.base_url}{endpoint}"
         try:
-            resp = requests.get(url, params={"weights_path": path}, timeout=120)
+            resp = requests.get(
+                url,
+                params={"weights_path": path},
+                timeout=cfg.request_timeout,
+            )
         except requests.exceptions.RequestException as e:
             raise TTSError(f"切换权重失败 ({endpoint}): {e}") from e
         if resp.status_code != 200:
@@ -301,9 +344,10 @@ def start_tts_server(
     try:
         _wait_until_ready(cfg.base_url, cfg.startup_timeout, process)
         _switch_weights(cfg)
-        _warmup(cfg)
+        if cfg.warmup:
+            _warmup(cfg)
     except Exception:
-        process.terminate()
+        stop_tts_process(process)
         raise
 
     logger.info("GPT-SoVITS 就绪 @ %s", cfg.base_url)
@@ -345,7 +389,8 @@ class GPTSoVITSClient(TTSClient):
             "top_k": 10,
             "top_p": 0.9,
             "temperature": 0.9,
-            "parallel_infer": True,
+            "parallel_infer": self.cfg.parallel_infer,
+            "sample_steps": self.cfg.sample_steps,
             "streaming_mode": streaming_mode,
             "media_type": "wav",
         }
@@ -358,7 +403,7 @@ class GPTSoVITSClient(TTSClient):
             resp = self._session.post(
                 f"{self.cfg.base_url}/tts",
                 json=self._payload(text),
-                timeout=120,
+                timeout=self.cfg.request_timeout,
             )
         except requests.exceptions.RequestException as e:
             logger.warning("GPT-SoVITS 请求失败: %s", e)
@@ -380,9 +425,9 @@ class GPTSoVITSClient(TTSClient):
         try:
             with self._session.post(
                 f"{self.cfg.base_url}/tts",
-                json=self._payload(text, streaming_mode=2),
+                json=self._payload(text, streaming_mode=self.cfg.streaming_mode),
                 stream=True,
-                timeout=(10, 300),
+                timeout=(10, self.cfg.request_timeout),
             ) as resp:
                 if resp.status_code != 200:
                     raise TTSError(

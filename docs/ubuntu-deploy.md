@@ -168,6 +168,29 @@ bash scripts/start_web.sh --tts gpt_sovits --pretrained-models /data/models/pret
 GPT_SOVITS_PRETRAINED_MODELS_DIR=/data/models/pretrained_models
 ```
 
+无 GPU 服务器建议同时保留这些默认值：
+
+```dotenv
+GPT_SOVITS_VERSION=v4
+GPT_SOVITS_WARMUP=0
+GPT_SOVITS_STREAMING_MODE=1
+GPT_SOVITS_PARALLEL_INFER=0
+GPT_SOVITS_SAMPLE_STEPS=8
+GPT_SOVITS_REQUEST_TIMEOUT=300
+GPT_SOVITS_STARTUP_TIMEOUT=180
+```
+
+说明：
+
+- `GPT_SOVITS_WARMUP=0` 避免启动后先合成“嗯。”并卡住首个真实请求。
+- GPT-SoVITS v4 在 CPU 上不支持真正逐 token 流式推理，会回退为“按分段返回”。本项目会在 LLM 输出时按句排队，尽早把已完成句子交给 TTS。
+- `GPT_SOVITS_SAMPLE_STEPS=8` 会明显缩短 v4 CPU 推理时间；如果音质不够，再尝试 12 或 16。
+- 如果切换配置后怀疑 9880 上还有旧的 GPT-SoVITS 进程，先执行：
+
+```bash
+sudo fuser -k 9880/tcp
+```
+
 ## 6. 生产反向代理
 
 直接暴露 5173 和 8000 端口可以测试；正式使用建议把前端构建后放到

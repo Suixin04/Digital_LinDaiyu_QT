@@ -33,7 +33,7 @@ from .logging_config import configure_app_logging
 from .resources import resolve_project_path
 from .tts import get_tts_client
 from .tts.base import TTSError, clean_for_tts
-from .tts.gpt_sovits import start_tts_server
+from .tts.gpt_sovits import start_tts_server, stop_tts_process
 
 configure_app_logging()
 
@@ -258,7 +258,7 @@ class TTSService:
                 self._client.close()
                 self._client = None
             if self._process is not None:
-                self._process.terminate()
+                stop_tts_process(self._process)
                 self._process = None
 
     def _ensure_stream_worker(self) -> None:
@@ -327,7 +327,7 @@ class TTSService:
             self._client = get_tts_client(cfg)
         if self._client is None:
             if self._process is not None:
-                self._process.terminate()
+                stop_tts_process(self._process)
                 self._process = None
             raise HTTPException(status_code=503, detail="TTS is unavailable")
         return self._client

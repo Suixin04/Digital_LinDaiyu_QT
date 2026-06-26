@@ -35,6 +35,24 @@ def env_flag(name: str, default: bool = True) -> bool:
     return value.lower() not in {"0", "false", "no", "off", "disabled"}
 
 
+def env_int(
+    name: str,
+    default: int,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> int:
+    """读取整数环境变量，并按需限制范围。"""
+    try:
+        value = int(_clean_env(name) or str(default))
+    except ValueError:
+        value = default
+    if min_value is not None:
+        value = max(min_value, value)
+    if max_value is not None:
+        value = min(max_value, value)
+    return value
+
+
 # --------------------------------------------------------------------------- #
 # Chat LLM
 # --------------------------------------------------------------------------- #
@@ -212,6 +230,7 @@ class GPTSoVITSConfig:
     port: int
     config_file: str         # 相对 project_dir，传给 api_v2 的 -c
     pretrained_models_dir: str | None  # 可选：覆盖 GPT_SoVITS/pretrained_models
+    version: str             # v1 / v2 / v3 / v4 / v2Pro / v2ProPlus
     gpt_weights: str         # 相对 project_dir
     sovits_weights: str      # 相对 project_dir
     ref_audio: str           # 绝对路径或相对项目根
@@ -221,6 +240,11 @@ class GPTSoVITSConfig:
     auto_start: bool
     ffmpeg_bin: str | None   # 启动子进程时要 prepend 到 PATH 的 FFmpeg bin 目录
     startup_timeout: int     # 等待 api_v2 起来的秒数
+    request_timeout: int     # 等待单次 TTS HTTP 请求完成的秒数
+    warmup: bool             # 是否启动后先合成一句短音频
+    streaming_mode: int      # api_v2 streaming_mode: 0/1/2/3
+    parallel_infer: bool
+    sample_steps: int        # v3/v4 vocoder 采样步数；越小越快
 
     @property
     def base_url(self) -> str:
@@ -240,15 +264,15 @@ def get_gpt_sovits_config() -> GPTSoVITSConfig:
         default_python = _sys.executable
     python_exe = _clean_env("GPT_SOVITS_PYTHON") or default_python
 
-    try:
-        port = int(_clean_env("GPT_SOVITS_PORT") or "9880")
-    except ValueError:
-        port = 9880
+    port = env_int("GPT_SOVITS_PORT", 9880, 1, 65535)
+    startup_timeout = env_int("GPT_SOVITS_STARTUP_TIMEOUT", 180, 5, 1800)
+    request_timeout = env_int("GPT_SOVITS_REQUEST_TIMEOUT", 300, 30, 3600)
+    streaming_mode = env_int("GPT_SOVITS_STREAMING_MODE", 1, 0, 3)
+    sample_steps = env_int("GPT_SOVITS_SAMPLE_STEPS", 8, 4, 32)
 
-    try:
-        startup_timeout = int(_clean_env("GPT_SOVITS_STARTUP_TIMEOUT") or "60")
-    except ValueError:
-        startup_timeout = 60
+    version = _clean_env("GPT_SOVITS_VERSION") or "v4"
+    if version not in {"v1", "v2", "v3", "v4", "v2Pro", "v2ProPlus"}:
+        version = "v4"
 
     default_ffmpeg = os.path.join(project_dir, "runtime", "ffmpeg", "bin")
     ffmpeg_bin = _clean_env("GPT_SOVITS_FFMPEG_BIN") or (
@@ -263,6 +287,7 @@ def get_gpt_sovits_config() -> GPTSoVITSConfig:
         config_file=_clean_env("GPT_SOVITS_CONFIG")
         or "GPT_SoVITS/configs/tts_infer.yaml",
         pretrained_models_dir=_clean_env("GPT_SOVITS_PRETRAINED_MODELS_DIR"),
+        version=version,
         gpt_weights=_clean_env("GPT_SOVITS_GPT_WEIGHTS")
         or "GPT_weights_v4/digital_ldy-e15.ckpt",
         sovits_weights=_clean_env("GPT_SOVITS_SOVITS_WEIGHTS")
@@ -274,4 +299,9 @@ def get_gpt_sovits_config() -> GPTSoVITSConfig:
         auto_start=env_flag("GPT_SOVITS_AUTO_START", True),
         ffmpeg_bin=ffmpeg_bin,
         startup_timeout=startup_timeout,
+        request_timeout=request_timeout,
+        warmup=env_flag("GPT_SOVITS_WARMUP", False),
+        streaming_mode=streaming_mode,
+        parallel_infer=env_flag("GPT_SOVITS_PARALLEL_INFER", False),
+        sample_steps=sample_steps,
     )
