@@ -82,6 +82,9 @@ class TTSStatusResponse(BaseModel):
     ready: bool
     auto_start: bool | None = None
     preload: bool | None = None
+    state: str = "disabled"
+    preloading: bool = False
+    preload_error: str | None = None
     base_url: str | None = None
 
 
@@ -186,6 +189,10 @@ class TTSService:
     def __init__(self) -> None:
         self._client = None
         self._process = None
+        self._state = "idle"
+        self._startup_error: str | None = None
+        self._startup_thread: threading.Thread | None = None
+        self._shutdown = threading.Event()
         self._lock = threading.RLock()
         self._tts_lock = threading.RLock()
         self._files: Deque[Path] = deque()
@@ -212,27 +219,63 @@ class TTSService:
             ready=self._client is not None,
             auto_start=auto_start,
             preload=preload,
+            state=self._state if cfg.backend != "none" else "disabled",
+            preloading=self._state == "starting",
+            preload_error=self._startup_error,
             base_url=base_url,
         )
 
-    def preload(self) -> None:
+    def start_preload(self) -> None:
         cfg = get_tts_config()
         if cfg.backend == "none":
             return
         if cfg.backend == "gpt_sovits" and not get_gpt_sovits_config().preload:
             logger.info("GPT-SoVITS preload disabled")
             return
-        logger.info("Preloading TTS backend: %s", cfg.backend)
-        with self._tts_lock:
-            self._ensure_client()
-        logger.info("TTS backend ready: %s", cfg.backend)
+        self._start_runtime_async(cfg.backend)
+
+    def _start_runtime_async(self, backend: str) -> None:
+        with self._lock:
+            if self._client is not None or self._state == "starting":
+                return
+            self._state = "starting"
+            self._startup_error = None
+            self._shutdown.clear()
+            self._startup_thread = threading.Thread(
+                target=self._preload_worker,
+                name="digital-lindaiyu-tts-preload",
+                args=(backend,),
+                daemon=True,
+            )
+            self._startup_thread.start()
+
+    def _preload_worker(self, backend: str) -> None:
+        try:
+            logger.info("Preloading TTS backend: %s", backend)
+            with self._tts_lock:
+                if self._shutdown.is_set():
+                    return
+                self._ensure_client_locked()
+                if self._shutdown.is_set():
+                    self._close_runtime_locked()
+                    return
+            logger.info("TTS backend ready: %s", backend)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("TTS preload failed")
+            with self._lock:
+                self._state = "failed"
+                self._startup_error = str(e)
+        finally:
+            with self._lock:
+                if self._state == "starting":
+                    self._state = "ready" if self._client is not None else "idle"
 
     def synthesize(self, text: str) -> str:
         spoken = clean_for_tts(text).strip()
         if not spoken:
             raise HTTPException(status_code=400, detail="text is empty")
         with self._tts_lock:
-            client = self._ensure_client()
+            client = self._ensure_client_locked()
             path = client.synthesize(spoken)
             if not path:
                 raise HTTPException(status_code=503, detail="TTS synthesis failed")
@@ -267,16 +310,30 @@ class TTSService:
             return self._stream_jobs.get(job_id)
 
     def close(self) -> None:
+        self._shutdown.set()
         with self._lock:
             if self._stream_worker_started:
                 self._stream_queue.put(None)
                 self._stream_worker_started = False
-            if self._client is not None:
-                self._client.close()
-                self._client = None
-            if self._process is not None:
-                stop_tts_process(self._process)
-                self._process = None
+        if not self._tts_lock.acquire(timeout=2):
+            logger.info("TTS runtime is busy during shutdown; background startup will exit")
+            return
+        try:
+            self._close_runtime_locked()
+        finally:
+            self._tts_lock.release()
+
+    def _close_runtime_locked(self) -> None:
+        if self._client is not None:
+            close_client = getattr(self._client, "close", None)
+            if callable(close_client):
+                close_client()
+            self._client = None
+        if self._process is not None:
+            stop_tts_process(self._process)
+            self._process = None
+        with self._lock:
+            self._state = "idle"
 
     def _ensure_stream_worker(self) -> None:
         with self._stream_worker_lock:
@@ -305,7 +362,7 @@ class TTSService:
     def _run_stream_job(self, job: AudioStreamJob) -> None:
         with self._tts_lock:
             logger.info("Starting TTS stream job %s: %s", job.id, job.text)
-            client = self._ensure_client()
+            client = self._ensure_client_locked()
             stream = getattr(client, "stream", None)
             if callable(stream):
                 sent = False
@@ -337,11 +394,14 @@ class TTSService:
                 except OSError:
                     pass
 
-    def _ensure_client(self):
+    def _ensure_client_locked(self):
         cfg = get_tts_config()
         if cfg.backend == "none":
             raise HTTPException(status_code=503, detail="TTS is disabled")
         if self._client is None:
+            with self._lock:
+                self._state = "starting"
+                self._startup_error = None
             if cfg.backend == "gpt_sovits":
                 self._process = start_tts_server(get_gpt_sovits_config())
             self._client = get_tts_client(cfg)
@@ -349,7 +409,13 @@ class TTSService:
             if self._process is not None:
                 stop_tts_process(self._process)
                 self._process = None
+            with self._lock:
+                self._state = "failed"
+                self._startup_error = "TTS is unavailable"
             raise HTTPException(status_code=503, detail="TTS is unavailable")
+        with self._lock:
+            self._state = "ready"
+            self._startup_error = None
         return self._client
 
     def _publish_audio(self, source: Path) -> str:
@@ -379,7 +445,7 @@ tts_service = TTSService()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
-        await asyncio.to_thread(tts_service.preload)
+        tts_service.start_preload()
         yield
     finally:
         tts_service.close()

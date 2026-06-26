@@ -267,14 +267,7 @@ class ChatEngine:
         # 取最后一条 AIMessage 作为完整回复
         for msg in reversed(final_state["messages"]):
             if isinstance(msg, AIMessage):
-                content = (
-                    msg.content if isinstance(msg.content, str) else str(msg.content)
-                )
-                self._on_chunk(content)
-                sentences, _ = pop_speakable_sentences(content, force=True)
-                for sentence in sentences:
-                    self._on_sentence(sentence)
-                return content
+                return msg.content if isinstance(msg.content, str) else str(msg.content)
         return ""
 
     def _build_agent_system_prompt(self) -> str:
